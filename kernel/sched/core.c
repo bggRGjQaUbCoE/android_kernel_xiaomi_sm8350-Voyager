@@ -4414,6 +4414,7 @@ void scheduler_tick(void)
 	unsigned int flag = 0;
 	unsigned long thermal_pressure;
 
+	arch_scale_freq_tick();
 	sched_clock_tick();
 
 	rq_lock(rq, &rf);
