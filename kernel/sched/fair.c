@@ -6307,19 +6307,16 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 {
 	struct cpumask *cpus = this_cpu_cpumask_var_ptr(select_idle_mask);
 	struct sched_domain *this_sd;
-<<<<<<< HEAD
-	u64 time, cost;
-	s64 delta;
-=======
 	u64 avg_cost, avg_idle;
 	u64 time;
->>>>>>> d76343c6b2b7 (sched/fair: Align rq->avg_idle and rq->avg_scan_cost)
 	int this = smp_processor_id();
 	int cpu, nr = INT_MAX, si_cpu = -1;
 
 	this_sd = rcu_dereference(*this_cpu_ptr(&sd_llc));
 	if (!this_sd)
 		return -1;
+
+	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
 
 	if (sched_feat(SIS_PROP)) {
 		u64 avg_cost, avg_idle, span_avg;
@@ -6336,11 +6333,9 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 			nr = div_u64(span_avg, avg_cost);
 		else
 			nr = 4;
+
+		time = cpu_clock(this);
 	}
-
-	time = cpu_clock(this);
-
-	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
 
 	for_each_cpu_wrap(cpu, cpus, target + 1) {
 		if (!--nr)
@@ -6353,8 +6348,10 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 			si_cpu = cpu;
 	}
 
-	time = cpu_clock(this) - time;
-	update_avg(&this_sd->avg_scan_cost, time);
+	if (sched_feat(SIS_PROP)) {
+		time = cpu_clock(this) - time;
+		update_avg(&this_sd->avg_scan_cost, time);
+	}
 
 	return cpu;
 }
