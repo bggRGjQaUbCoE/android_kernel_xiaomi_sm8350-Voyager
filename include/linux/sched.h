@@ -2288,6 +2288,12 @@ int sched_trace_rq_cpu(struct rq *rq);
 
 const struct cpumask *sched_trace_rd_span(struct root_domain *rd);
 
+#ifdef CONFIG_SCHED_CORE
+extern void sched_core_free(struct task_struct *tsk);
+#else
+static inline void sched_core_free(struct task_struct *tsk) { }
+#endif
+
 #ifdef CONFIG_SCHED_WALT
 #define PF_WAKE_UP_IDLE	1
 static inline u32 sched_get_wake_up_idle(struct task_struct *p)
