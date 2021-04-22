@@ -11766,6 +11766,14 @@ int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		return 0;
 
 	update_misfit_status(NULL, this_rq);
+
+	/*
+	 * There is a task waiting to run. No need to search for one.
+	 * Return 0; the task will be enqueued when switching to idle.
+	 */
+	if (this_rq->ttwu_pending)
+		return 0;
+
 	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
 	 * measure the duration of idle_balance() as idle time.
@@ -11846,7 +11854,7 @@ int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		 * tasks on this rq or if active migration kicked in.
 		 */
 		if (pulled_task || this_rq->nr_running > 0 ||
-						!continue_balancing)
+		    this_rq->ttwu_pending)
 			break;
 	}
 	rcu_read_unlock();
