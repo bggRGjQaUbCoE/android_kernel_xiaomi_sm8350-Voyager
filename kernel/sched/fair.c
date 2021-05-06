@@ -27,6 +27,8 @@
 
 #include "walt/walt.h"
 
+#include "sched_pixel.h"
+
 #ifdef CONFIG_SMP
 static inline bool task_fits_max(struct task_struct *p, int cpu);
 #endif /* CONFIG_SMP */
@@ -6974,9 +6976,7 @@ static long
 compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 {
 	struct cpumask *pd_mask = perf_domain_span(pd);
-#ifndef CONFIG_SCHED_WALT
 	unsigned long cpu_cap = arch_scale_cpu_capacity(cpumask_first(pd_mask));
-#endif
 	unsigned long max_util = 0, sum_util = 0;
 	unsigned long energy = 0;
 	int cpu;
@@ -6992,11 +6992,7 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 	 * its pd list and will not be accounted by compute_energy().
 	 */
 	for_each_cpu_and(cpu, pd_mask, cpu_online_mask) {
-#ifdef CONFIG_SCHED_WALT
-		cpu_util = cpu_util_next_walt(cpu, p, dst_cpu);
-		sum_util += cpu_util;
-#else
-		unsigned long util_cfs = cpu_util_next(cpu, p, dst_cpu);
+		unsigned long util_cfs = cpu_util_next_walt(cpu, p, dst_cpu);
 		struct task_struct *tsk = cpu == dst_cpu ? p : NULL;
 
 		/*

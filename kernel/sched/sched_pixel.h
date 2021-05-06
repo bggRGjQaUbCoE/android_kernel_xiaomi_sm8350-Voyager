@@ -39,10 +39,12 @@ struct vendor_task_struct {
 
 ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_vendor_data1[64], struct vendor_task_struct t);
 
-
 static inline struct vendor_task_struct *get_vendor_task_struct(struct task_struct *p)
 {
 	return (struct vendor_task_struct *)p->android_vendor_data1;
 }
 
+extern unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
+				 unsigned long max, enum schedutil_type type,
+				 struct task_struct *p);
 #endif

@@ -85,11 +85,11 @@ extern unsigned long cpu_util_cfs_group_mod(struct rq *rq);
 #define cpu_util_cfs_group_mod cpu_util_cfs
 #endif
 
-static struct static_key_false sched_uclamp_used;
-
-static inline bool uclamp_is_used(void)
+unsigned int map_scaling_freq(int cpu, unsigned int freq)
 {
-	return static_branch_likely(&sched_uclamp_used);
+	struct cpufreq_policy *policy = cpufreq_cpu_get_raw(cpu);
+
+	return policy ? clamp(freq, policy->min, policy->max) : freq;
 }
 
 /************************ Governor internals ***********************/

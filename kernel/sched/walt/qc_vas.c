@@ -7,6 +7,7 @@
 #include <trace/events/sched.h>
 
 #include "qc_vas.h"
+#include "../sched_priv.h"
 
 #ifdef CONFIG_SCHED_WALT
 /* 1ms default for 20ms window size scaled to 1024 */
@@ -14,26 +15,30 @@ unsigned int sysctl_sched_min_task_util_for_boost = 51;
 /* 0.68ms default for 20ms window size scaled to 1024 */
 unsigned int sysctl_sched_min_task_util_for_colocation = 35;
 
+
+unsigned int map_scaling_freq(int cpu, unsigned int freq);
+
 static void create_util_to_cost_pd(struct em_perf_domain *pd)
 {
 	int util, cpu = cpumask_first(to_cpumask(pd->cpus));
-	unsigned long fmax;
 	unsigned long scale_cpu;
+	struct em_cap_state *ps;
 	struct rq *rq = cpu_rq(cpu);
 	struct walt_sched_cluster *cluster = rq->wrq.cluster;
 
-	fmax = (u64)pd->table[pd->nr_cap_states - 1].frequency;
 	scale_cpu = arch_scale_cpu_capacity(cpu);
+	ps = &pd->table[pd->nr_cap_states - 1];
 
 	for (util = 0; util < 1024; util++) {
 		int j;
+	        unsigned long fmax;
 
-		int f = (fmax * util) / scale_cpu;
-		struct em_cap_state *ps = &pd->table[0];
+	        fmax = map_util_freq_pixel_mod(util, ps->frequency, scale_cpu, cpu);
+                fmax = map_scaling_freq(cpu, fmax);
 
 		for (j = 0; j < pd->nr_cap_states; j++) {
 			ps = &pd->table[j];
-			if (ps->frequency >= f)
+			if (ps->frequency >= fmax)
 				break;
 		}
 		cluster->util_to_cost[util] = ps->cost;
