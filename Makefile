@@ -399,17 +399,11 @@ HOST_LFS_LDFLAGS := $(shell getconf LFS_LDFLAGS 2>/dev/null)
 HOST_LFS_LIBS := $(shell getconf LFS_LIBS 2>/dev/null)
 
 ifneq ($(LLVM),)
-ifneq ($(filter %/,$(LLVM)),)
-LLVM_PREFIX := $(LLVM)
-else ifneq ($(filter -%,$(LLVM)),)
-LLVM_SUFFIX := $(LLVM)
-endif
-
-HOSTCC	= $(LLVM_PREFIX)clang$(LLVM_SUFFIX)
-HOSTCXX	= $(LLVM_PREFIX)clang++$(LLVM_SUFFIX)
+HOSTCC	= $(CCACHE) clang
+HOSTCXX	= $(CCACHE) clang++
 else
-HOSTCC	= gcc
-HOSTCXX	= g++
+HOSTCC	= $(CCACHE) gcc
+HOSTCXX	= $(CCACHE) g++
 endif
 KBUILD_HOSTCFLAGS   := -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 \
 		-fomit-frame-pointer -std=gnu89 $(HOST_LFS_CFLAGS) \
@@ -421,21 +415,21 @@ KBUILD_HOSTLDLIBS   := $(HOST_LFS_LIBS) $(HOSTLDLIBS)
 # Make variables (CC, etc...)
 CPP		= $(CC) -E
 ifneq ($(LLVM),)
-CC		= $(LLVM_PREFIX)clang$(LLVM_SUFFIX)
-LD		= $(LLVM_PREFIX)ld.lld$(LLVM_SUFFIX)
-AR		= $(LLVM_PREFIX)llvm-ar$(LLVM_SUFFIX)
-NM		= $(LLVM_PREFIX)llvm-nm$(LLVM_SUFFIX)
-OBJCOPY		= $(LLVM_PREFIX)llvm-objcopy$(LLVM_SUFFIX)
-OBJDUMP		= $(LLVM_PREFIX)llvm-objdump$(LLVM_SUFFIX)
-READELF		= $(LLVM_PREFIX)llvm-readelf$(LLVM_SUFFIX)
-STRIP		= $(LLVM_PREFIX)llvm-strip$(LLVM_SUFFIX)
+CC		= $(CCACHE) clang
+LD		= $(CCACHE) ld.lld
+AR		= $(CCACHE) llvm-ar
+NM		= llvm-nm
+OBJCOPY		= $(CCACHE) llvm-objcopy
+OBJDUMP		= $(CCACHE) llvm-objdump
+READELF		= llvm-readelf
+STRIP		= llvm-strip
 else
-CC		= $(CROSS_COMPILE)gcc
-LD		= $(CROSS_COMPILE)ld
-AR		= $(CROSS_COMPILE)ar
+CC		= $(CCACHE) $(CROSS_COMPILE)gcc
+LD		= $(CCACHE) $(CROSS_COMPILE)ld
+AR		= $(CCACHE) $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
-OBJCOPY		= $(CROSS_COMPILE)objcopy
-OBJDUMP		= $(CROSS_COMPILE)objdump
+OBJCOPY		= $(CCACHE) $(CROSS_COMPILE)objcopy
+OBJDUMP		= $(CCACHE) $(CROSS_COMPILE)objdump
 READELF		= $(CROSS_COMPILE)readelf
 STRIP		= $(CROSS_COMPILE)strip
 endif
