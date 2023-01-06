@@ -309,6 +309,34 @@ static int in_sched_bug;
 	}						\
 })
 
+#if defined(CONFIG_UCLAMP_TASK_GROUP) && defined(CONFIG_SCHED_WALT)
+#define UC_READ_F(NAME, MEMBER, DEFAULT) \
+unsigned int NAME(struct task_struct *p) \
+{ \
+	struct cgroup_subsys_state *css; \
+	struct task_group *tg; \
+	unsigned int ret; \
+\
+	rcu_read_lock(); \
+	css = task_css(p, cpu_cgrp_id); \
+	if (!css) { \
+		rcu_read_unlock(); \
+		return DEFAULT; \
+	} \
+	tg = container_of(css, struct task_group, css); \
+	ret = tg->wtg.MEMBER; \
+	rcu_read_unlock(); \
+\
+	return ret; \
+}
+
+UC_READ_F(uclamp_window_policy, window_policy,
+                               WINDOW_STATS_MAX_RECENT_AVG)
+UC_READ_F(uclamp_discount_wait_time, discount_wait_time, 0)
+UC_READ_F(uclamp_top_task_filter, top_task_filter, 0)
+UC_READ_F(uclamp_ed_task_filter, ed_task_filter, 0)
+#endif
+
 static void fixup_walt_sched_stats_common(struct rq *rq, struct task_struct *p,
 				   u16 updated_demand_scaled,
 				   u16 updated_pred_demand_scaled)
@@ -433,6 +461,10 @@ void clear_ed_task(struct task_struct *p, struct rq *rq)
 
 static inline bool is_ed_task(struct task_struct *p, u64 wallclock)
 {
+#if defined(CONFIG_UCLAMP_TASK_GROUP) 
+	if (uclamp_ed_task_filter(p))
+		return false;
+#endif
 	return (wallclock - p->wts.last_wake_ts >= EARLY_DETECTION_DURATION);
 }
 
@@ -1324,6 +1356,11 @@ static void update_top_tasks(struct task_struct *p, struct rq *rq,
 	u32 prev_window = p->wts.prev_window;
 	bool zero_index_update;
 
+#if defined(CONFIG_UCLAMP_TASK_GROUP) 
+	if (uclamp_top_task_filter(p))
+		return;
+#endif
+
 	if (old_curr_window == curr_window && !new_window)
 		return;
 
@@ -1832,10 +1869,16 @@ account_busy_for_task_demand(struct rq *rq, struct task_struct *p, int event)
 	 * when a task begins to run or is migrated, it is not running and
 	 * is completing a segment of non-busy time.
 	 */
+#if defined(CONFIG_UCLAMP_TASK_GROUP)
+	if (event == TASK_WAKE || ((!SCHED_ACCOUNT_WAIT_TIME ||
+			  uclamp_discount_wait_time(p)) &&
+			 (event == PICK_NEXT_TASK || event == TASK_MIGRATE)))
+		return 0;
+#else
 	if (event == TASK_WAKE || (!SCHED_ACCOUNT_WAIT_TIME &&
 			 (event == PICK_NEXT_TASK || event == TASK_MIGRATE)))
 		return 0;
-
+#endif
 	/*
 	 * The idle exit time is not accounted for the first task _picked_ up to
 	 * run on the idle CPU.
@@ -1851,7 +1894,12 @@ account_busy_for_task_demand(struct rq *rq, struct task_struct *p, int event)
 		if (rq->curr == p)
 			return 1;
 
+#if defined(CONFIG_UCLAMP_TASK_GROUP)
+		return p->on_rq ? (SCHED_ACCOUNT_WAIT_TIME &&
+		                   !uclamp_discount_wait_time(p)) : 0;
+#else
 		return p->on_rq ? SCHED_ACCOUNT_WAIT_TIME : 0;
+#endif
 	}
 
 	return 1;
@@ -1873,6 +1921,9 @@ static void update_history(struct rq *rq, struct task_struct *p,
 	u32 max = 0, avg, demand, pred_demand;
 	u64 sum = 0;
 	u16 demand_scaled, pred_demand_scaled;
+#if defined(CONFIG_UCLAMP_TASK_GROUP)
+	unsigned int window_policy = sysctl_sched_window_stats_policy;
+#endif
 
 	/* Ignore windows where task had no activity */
 	if (!runtime || is_idle_task(p) || !samples)
@@ -1897,6 +1948,21 @@ static void update_history(struct rq *rq, struct task_struct *p,
 
 	p->wts.sum = 0;
 
+#if defined(CONFIG_UCLAMP_TASK_GROUP)
+	window_policy = uclamp_window_policy(p);
+
+	if (window_policy == WINDOW_STATS_RECENT) {
+		demand = runtime;
+	} else if (window_policy == WINDOW_STATS_MAX) {
+		demand = max;
+	} else {
+		avg = div64_u64(sum, sched_ravg_hist_size);
+		if (window_policy == WINDOW_STATS_AVG)
+			demand = avg;
+		else
+			demand = max(avg, runtime);
+	}
+#else
 	if (sysctl_sched_window_stats_policy == WINDOW_STATS_RECENT) {
 		demand = runtime;
 	} else if (sysctl_sched_window_stats_policy == WINDOW_STATS_MAX) {
@@ -1908,6 +1974,7 @@ static void update_history(struct rq *rq, struct task_struct *p,
 		else
 			demand = max(avg, runtime);
 	}
+#endif
 	pred_demand = predict_and_update_buckets(p, runtime);
 	demand_scaled = scale_demand(demand);
 	pred_demand_scaled = scale_demand(pred_demand);

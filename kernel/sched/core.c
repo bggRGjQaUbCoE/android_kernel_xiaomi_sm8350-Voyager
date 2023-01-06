@@ -7570,6 +7570,54 @@ void sched_move_task(struct task_struct *tsk)
 	task_rq_unlock(rq, tsk, &rf);
 }
 
+#if defined(CONFIG_SCHED_WALT) && defined(CONFIG_UCLAMP_TASK_GROUP)
+#define WINDOW_POLICY_INVALID 4
+static u64
+window_policy_read(struct cgroup_subsys_state *css,
+		struct cftype *cft)
+{
+	struct task_group *tg = css_tg(css);
+	return tg->wtg.window_policy;
+}
+
+static int
+window_policy_write(struct cgroup_subsys_state *css, struct cftype *cft,
+		u64 window_policy)
+{
+	struct task_group *tg = css_tg(css);
+
+	if (window_policy >= WINDOW_POLICY_INVALID)
+		return -EINVAL;
+
+	tg->wtg.window_policy = window_policy;
+
+	return 0;
+}
+
+#define PE_FUNC(NAME) \
+static u64 NAME##_read(struct cgroup_subsys_state *css, \
+		struct cftype *cft) \
+{ \
+	struct task_group *tg = css_tg(css); \
+	return tg->wtg.NAME; \
+} \
+ \
+static int \
+NAME##_write(struct cgroup_subsys_state *css, struct cftype *cft, \
+		u64 NAME) \
+{ \
+	struct task_group *tg = css_tg(css); \
+ \
+	tg->wtg.NAME = !!NAME; \
+ \
+	return 0; \
+}
+
+PE_FUNC(discount_wait_time)
+PE_FUNC(top_task_filter)
+PE_FUNC(ed_task_filter)
+#endif /* CONFIG_SCHED_WALT */
+
 static struct cgroup_subsys_state *
 cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 {
@@ -8269,6 +8317,26 @@ static struct cftype cpu_legacy_files[] = {
 		.read_u64 = sched_colocate_read,
 		.write_u64 = sched_colocate_write,
 	},
+	{
+		.name = "uclamp.window_policy",
+		.read_u64 = window_policy_read,
+		.write_u64 = window_policy_write,
+	},
+	{
+		.name = "uclamp.discount_wait_time",
+		.read_u64 = discount_wait_time_read,
+		.write_u64 = discount_wait_time_write,
+	},
+	{
+		.name = "uclamp.top_task_filter",
+		.read_u64 = top_task_filter_read,
+		.write_u64 = top_task_filter_write,
+	},
+	{
+		.name = "uclamp.ed_task_filter",
+		.read_u64 = ed_task_filter_read,
+		.write_u64 = ed_task_filter_write,
+	},
 #endif /* CONFIG_SCHED_WALT */
 #endif /* CONFIG_UCLAMP_TASK_GROUP */
 	{ }	/* Terminate */
@@ -8469,6 +8537,26 @@ static struct cftype cpu_files[] = {
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.read_u64 = sched_colocate_read,
 		.write_u64 = sched_colocate_write,
+	},
+	{
+		.name = "uclamp.window_policy",
+		.read_u64 = window_policy_read,
+		.write_u64 = window_policy_write,
+	},
+	{
+		.name = "uclamp.discount_wait_time",
+		.read_u64 = discount_wait_time_read,
+		.write_u64 = discount_wait_time_write,
+	},
+	{
+		.name = "uclamp.top_task_filter",
+		.read_u64 = top_task_filter_read,
+		.write_u64 = top_task_filter_write,
+	},
+	{
+		.name = "uclamp.ed_task_filter",
+		.read_u64 = ed_task_filter_read,
+		.write_u64 = ed_task_filter_write,
 	},
 #endif /* CONFIG_SCHED_WALT */
 #endif /* CONFIG_UCLAMP_TASK_GROUP */

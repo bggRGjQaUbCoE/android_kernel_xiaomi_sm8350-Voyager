@@ -124,6 +124,12 @@ struct walt_task_group {
 	bool colocate;
 	/* Controls whether further updates are allowed to the colocate flag */
 	bool colocate_update_disabled;
+#if defined(CONFIG_UCLAMP_TASK_GROUP) && defined(CONFIG_SCHED_WALT)
+	unsigned int window_policy;
+	bool discount_wait_time;
+	bool top_task_filter;
+	bool ed_task_filter;
+#endif
 };
 
 struct walt_root_domain {
@@ -529,7 +535,6 @@ struct task_group {
 	struct walt_task_group	wtg;
 #endif /* CONFIG_SCHED_WALT */
 #endif /* CONFIG_UCLAMP_TASK_GROUP */
-
 };
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
