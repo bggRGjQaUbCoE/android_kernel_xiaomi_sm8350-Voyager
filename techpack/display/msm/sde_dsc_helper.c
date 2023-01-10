@@ -276,6 +276,7 @@ int sde_dsc_populate_dsc_config(struct drm_dsc_config *dsc, int scr_ver) {
 			sde_dsc_rc_range_min_qp[ratio_idx][i];
 		if ((dsc->dsc_panel_id >> 8) == 0x4B38004202 ||
 				(dsc->dsc_panel_id >> 8) == 0x4B39003602 ||
+				(dsc->dsc_panel_id >> 8) == 0x4B3942004202 ||
 				(dsc->dsc_panel_id >> 8) == 0x4B3944003602)
 			dsc->rc_range_params[i].range_max_qp =
 				sde_dsc_rc_range_max_qp_nt[ratio_idx][i];
