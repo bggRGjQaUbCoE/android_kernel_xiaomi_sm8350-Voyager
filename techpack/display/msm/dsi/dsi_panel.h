@@ -170,6 +170,7 @@ enum esd_check_status_mode {
 struct drm_panel_esd_config {
 	bool esd_enabled;
 
+	struct dsi_panel_cmd_set offset_cmd;
 	enum esd_check_status_mode status_mode;
 	struct dsi_panel_cmd_set status_cmd;
 	u32 *status_cmds_rlen;
@@ -426,5 +427,8 @@ int dsi_panel_get_fod_hbm(struct dsi_panel *panel);
 int dsi_panel_apply_requested_fod_hbm(struct dsi_panel *panel);
 void dsi_panel_set_fod_ui(struct dsi_panel *panel, bool status);
 void dsi_panel_request_fod_hbm(struct dsi_panel *panel, bool status);
+
+int dsi_panel_write_cmd_set(struct dsi_panel *panel,
+			struct dsi_panel_cmd_set *cmd_sets);
 
 #endif /* _DSI_PANEL_H_ */

@@ -829,6 +829,7 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 					bool te_check_override)
 {
 	struct dsi_display *dsi_display = display;
+	struct drm_panel_esd_config *config;
 	struct dsi_panel *panel;
 	u32 status_mode;
 	int rc = 0x1, ret;
@@ -869,6 +870,15 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 	if ((dsi_display->trusted_vm_env) ||
 			(panel->panel_mode == DSI_OP_VIDEO_MODE))
 		te_rechecks = 0;
+
+	if (status_mode == ESD_MODE_REG_READ) {
+		config = &(panel->esd_config);
+		if (config->offset_cmd.count != 0) {
+			rc = dsi_panel_write_cmd_set(dsi_display->panel,
+				&config->offset_cmd);
+			DSI_DEBUG("%s: read reg offset command rc = %d\n",__func__, rc);
+		}
+	}
 
 	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
 		DSI_ALL_CLKS, DSI_CLK_ON);
