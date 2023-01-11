@@ -269,19 +269,27 @@ ifeq ($(KERNEL_BUILD), 1)
 	obj-y	+= rouleur/
 endif
 
-ifneq (,$(filter $(TARGET_PRODUCT), venus star haydn odin vili))
+ifdef CONFIG_MACH_XIAOMI_SM8350
 	obj-y	+= cs35l41/
 endif
 
-ifneq (,$(filter $(TARGET_PRODUCT), cetus argo))
+ifdef CONFIG_MACH_XIAOMI_CETUS
 	obj-y	+= cs35l45/
 endif
 
-ifneq (,$(filter $(TARGET_PRODUCT), renoir lisa))
+ifdef CONFIG_MACH_XIAOMI_RENOIR
 	obj-y	+= tfa98xx/
 endif
 
-ifneq (,$(filter $(TARGET_PRODUCT), mona zijin))
+ifdef CONFIG_MACH_XIAOMI_LISA
+	obj-y	+= tfa98xx/
+endif
+
+ifdef CONFIG_MACH_XIAOMI_MONA
+	obj-y	+= aw88263s/
+endif
+
+ifdef CONFIG_MACH_XIAOMI_ZIJIN
 	obj-y	+= aw88263s/
 endif
 
