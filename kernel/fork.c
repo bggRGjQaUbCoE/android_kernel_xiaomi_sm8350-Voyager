@@ -2464,6 +2464,10 @@ long _do_fork(struct kernel_clone_args *args)
 		task_unlock(p);
 	}
 
+#ifdef CONFIG_PERF_CRITICAL_RT_TASK
+	p->critical_rt_task = 0;
+#endif
+
 #ifdef CONFIG_SF_BINDER
 	p->sf_binder_task = 0;
 #endif
