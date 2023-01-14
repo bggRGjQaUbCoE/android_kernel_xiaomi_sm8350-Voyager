@@ -2464,6 +2464,10 @@ long _do_fork(struct kernel_clone_args *args)
 		task_unlock(p);
 	}
 
+#ifdef CONFIG_SF_BINDER
+	p->sf_binder_task = 0;
+#endif
+
 	wake_up_new_task(p);
 
 	/* forking complete and child started to run, tell ptracer */
