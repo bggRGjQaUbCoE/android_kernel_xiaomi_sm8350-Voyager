@@ -12,6 +12,8 @@
 #define DEBUG
 #define pr_fmt(fmt)     KBUILD_MODNAME ": " fmt
 
+#define GOODIX_DRM_INTERFACE_WA
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/ioctl.h>
@@ -40,12 +42,11 @@
 #include <linux/cpufreq.h>
 #include <linux/pm_wakeup.h>
 #include <drm/drm_bridge.h>
-
-#include "gf_spi.h"
-
 #ifndef GOODIX_DRM_INTERFACE_WA
 #include <drm/drm_notifier.h>
 #endif
+
+#include "gf_spi.h"
 
 #if defined(USE_SPI_BUS)
 #include <linux/spi/spi.h>
@@ -618,9 +619,7 @@ static irqreturn_t gf_irq(int irq, void *handle)
 		input_report_key(gf_dev->input, key_input, 0);
 		input_sync(gf_dev->input);
 		gf_dev->wait_finger_down = false;
-#ifndef GOODIX_DRM_INTERFACE_WA
 		schedule_work(&gf_dev->work);
-#endif
 	}
 #elif defined (GF_FASYNC)
 	struct gf_dev *gf_dev = &gf;
