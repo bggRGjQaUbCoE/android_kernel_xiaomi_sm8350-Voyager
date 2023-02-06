@@ -1251,6 +1251,7 @@ static ssize_t stm_fts_cmd_show(struct device *dev,
 			res = (res | ERROR_DISABLE_INTER);
 			goto END;
 		}
+/*
 #if defined(CONFIG_DRM)
 	if (active_panel)
 		res = drm_panel_notifier_unregister(active_panel, &info->notifier);
@@ -1260,6 +1261,7 @@ static ssize_t stm_fts_cmd_show(struct device *dev,
 			goto END;
 		}
 #endif
+*/
 		switch (typeOfComand[0]) {
 			/*ITO TEST */
 		case 0x01:
@@ -1477,10 +1479,12 @@ static ssize_t stm_fts_cmd_show(struct device *dev,
 		res = ERROR_OP_NOT_ALLOW;
 
 	}
+/*
 #if defined(CONFIG_DRM)
 	if (active_panel)
 		drm_panel_notifier_register(active_panel, &info->notifier);
 #endif
+*/
 END:
 	all_strbuff = (u8 *) kzalloc(size, GFP_KERNEL);
 
@@ -3945,7 +3949,7 @@ static void fts_enter_pointer_event_handler(struct fts_ts_info *info,
 				info->fod_coordinate_update = true;
 				__set_bit(touchId, &info->fod_id);
 				input_report_abs(info->input_dev, ABS_MT_WIDTH_MINOR, info->fod_overlap);
-				if (!info->board->support_fod) {
+				if (info->board->support_fod) {
 					input_report_key(info->input_dev, BTN_INFO, 1);
 					update_fod_press_status(1);
 				}
@@ -4936,9 +4940,7 @@ static const char *fts_get_config(struct fts_ts_info *info)
 	struct fts_hw_platform_data *pdata = info->board;
 	int i = 0, ret = 0;
 
-	ret = fts_get_lockdown_info(info->lockdown_info, info);
-
-	if (ret < OK) {
+	if (!info->lockdown_is_ok) {
 		logError(1, "%s can't read lockdown info", tag);
 		return pdata->default_fw_name;
 	}
@@ -4971,9 +4973,7 @@ const char *fts_get_limit(struct fts_ts_info *info)
 	struct fts_hw_platform_data *pdata = info->board;
 	int i = 0, ret = 0;
 
-	ret = fts_get_lockdown_info(info->lockdown_info, info);
-
-	if (ret < OK) {
+	if (!info->lockdown_is_ok) {
 		logError(1, "%s can't read lockdown info", tag);
 		return LIMITS_FILE;
 	}
