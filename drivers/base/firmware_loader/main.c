@@ -468,7 +468,7 @@ static int __init firmware_param_path_set(char *val)
 	int i;
 	char *path, *end;
 
-	strscpy(strpath, val, sizeof(strpath));
+	strcpy(strpath, val);
 	/* Remove leading and trailing spaces from path */
 	path = strim(strpath);
 	for (i = 0; path && i < CUSTOM_FW_PATH_COUNT; i++) {
@@ -485,11 +485,11 @@ static int __init firmware_param_path_set(char *val)
 			*end = '\0';
 		else {
 			/* end of the string reached and no other tockens ','  */
-			strscpy(fw_path_para[i], path, PATH_SIZE);
+			strncpy(fw_path_para[i], path, PATH_SIZE);
 			break;
 		}
 
-		strscpy(fw_path_para[i], path, PATH_SIZE);
+		strncpy(fw_path_para[i], path, PATH_SIZE);
 		path = ++end;
 	}
 
