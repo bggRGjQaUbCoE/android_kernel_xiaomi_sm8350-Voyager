@@ -45,13 +45,8 @@
  */
 #define CAM_REQ_MGR_MAX_HANDLES           64
 
-#if defined(HAYDN_CAM)
-// XIAOMI modify CAM_REQ_MGR_MAX_HANDLES_V2 from 128 to 192 for parallelVTCam need more session handles.
-#define CAM_REQ_MGR_MAX_HANDLES_V2        192
-#else
 // XIAOMI modify CAM_REQ_MGR_MAX_HANDLES_V2 from 128 to 256 for parallelVTCam need more session handles.
 #define CAM_REQ_MGR_MAX_HANDLES_V2        256
-#endif
 
 #define MAX_LINKS_PER_SESSION             2
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2021 XiaoMi, Inc.
  */
 
@@ -1069,7 +1069,8 @@ static bool cam_icp_update_clk_free(struct cam_icp_hw_mgr *hw_mgr,
 
 static bool cam_icp_debug_clk_update(struct cam_icp_clk_info *hw_mgr_clk_info)
 {
-	if (icp_hw_mgr.icp_debug_clk &&
+	if (icp_hw_mgr.icp_debug_clk < ICP_CLK_TURBO_HZ &&
+		icp_hw_mgr.icp_debug_clk &&
 		icp_hw_mgr.icp_debug_clk != hw_mgr_clk_info->curr_clk) {
 		hw_mgr_clk_info->base_clk = icp_hw_mgr.icp_debug_clk;
 		hw_mgr_clk_info->curr_clk = icp_hw_mgr.icp_debug_clk;
@@ -4216,13 +4217,13 @@ static int cam_icp_mgr_pkt_validation(struct cam_packet *packet)
 		return -EINVAL;
 	}
 
-	if (!packet->num_io_configs || packet->num_io_configs > IPE_IO_IMAGES_MAX) {
+	if (packet->num_io_configs > IPE_IO_IMAGES_MAX) {
 		CAM_ERR(CAM_ICP, "Invalid number of io configs: %d %d",
 			IPE_IO_IMAGES_MAX, packet->num_io_configs);
 		return -EINVAL;
 	}
 
-	if (!packet->num_cmd_buf || packet->num_cmd_buf > CAM_ICP_CTX_MAX_CMD_BUFFERS) {
+	if (packet->num_cmd_buf > CAM_ICP_CTX_MAX_CMD_BUFFERS) {
 		CAM_ERR(CAM_ICP, "Invalid number of cmd buffers: %d %d",
 			CAM_ICP_CTX_MAX_CMD_BUFFERS, packet->num_cmd_buf);
 		return -EINVAL;

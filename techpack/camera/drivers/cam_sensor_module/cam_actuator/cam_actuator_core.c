@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2021 XiaoMi, Inc.
  */
 
@@ -319,20 +319,6 @@ int32_t cam_actuator_apply_request(struct cam_req_mgr_apply_request *apply)
 		a_ctrl->i2c_data.per_frame[request_id].request_id) &&
 		(a_ctrl->i2c_data.per_frame[request_id].is_settings_valid)
 		== 1) {
-
-#if defined(ZIJIN_CAM)
-		if ((a_ctrl->setting_apply_state == ACT_APPLY_SETTINGS_LATER) &&
-			(apply->request_id == 13)) {
-			usleep_range(10000, 10010);
-		}
-#endif
-
-#if defined(REDWOOD_CAM)
-		if ((a_ctrl->setting_apply_state == ACT_APPLY_SETTINGS_LATER) &&
-			(apply->request_id == 13)) {
-			usleep_range(3000, 3010);
-		}
-#endif
 		rc = cam_actuator_apply_settings(a_ctrl,
 			&a_ctrl->i2c_data.per_frame[request_id]);
 		if (rc < 0) {
@@ -402,10 +388,11 @@ static int cam_actuator_update_req_mgr(
 	int rc = 0;
 	struct cam_req_mgr_add_request add_req;
 
-	memset(&add_req, 0, sizeof(add_req));
 	add_req.link_hdl = a_ctrl->bridge_intf.link_hdl;
 	add_req.req_id = csl_packet->header.request_id;
 	add_req.dev_hdl = a_ctrl->bridge_intf.device_hdl;
+	add_req.skip_before_applying = 0;
+	add_req.trigger_eof = false;
 
 	if (a_ctrl->bridge_intf.crm_cb &&
 		a_ctrl->bridge_intf.crm_cb->add_req) {
@@ -887,11 +874,6 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 
 		actuator_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
-		if (actuator_acq_dev.device_handle <= 0) {
-			rc = -EFAULT;
-			CAM_ERR(CAM_ACTUATOR, "Can not create device handle");
-			goto release_mutex;
-		}
 		a_ctrl->bridge_intf.device_hdl = actuator_acq_dev.device_handle;
 		a_ctrl->bridge_intf.session_hdl =
 			actuator_acq_dev.session_handle;

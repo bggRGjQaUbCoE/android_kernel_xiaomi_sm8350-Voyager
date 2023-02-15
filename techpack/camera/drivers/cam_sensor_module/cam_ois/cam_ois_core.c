@@ -94,10 +94,6 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 
 	ois_acq_dev.device_handle =
 		cam_create_device_hdl(&bridge_params);
-	if (ois_acq_dev.device_handle <= 0) {
-		CAM_ERR(CAM_OIS, "Can not create device handle");
-		return -EFAULT;
-	}
 	o_ctrl->bridge_intf.device_hdl = ois_acq_dev.device_handle;
 	o_ctrl->bridge_intf.session_hdl = ois_acq_dev.session_handle;
 
@@ -341,10 +337,7 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 			ois_info->slave_addr >> 1;
 		o_ctrl->ois_fw_flag = ois_info->ois_fw_flag;
 		o_ctrl->is_ois_calib = ois_info->is_ois_calib;
-		//xiaomi add begin
-		o_ctrl->is_ois_pre_init = ois_info->is_ois_pre_init;
-		o_ctrl->is_ois_post_init = ois_info->is_ois_post_init;
-		//xiaomi add end
+		o_ctrl->is_ois_pre_init = ois_info->is_ois_pre_init; //xiaomi add
 		memcpy(o_ctrl->ois_name, ois_info->ois_name, OIS_NAME_LEN);
 		o_ctrl->ois_name[OIS_NAME_LEN - 1] = '\0';
 		o_ctrl->io_master_info.cci_client->retries = 3;
@@ -505,7 +498,7 @@ static int cam_default_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 	/* Load MEM, this step is not necessary for every ois, so skip load if not exist*/
 	rc = request_firmware(&fw, fw_name_mem, dev);
 	if (rc) {
-		CAM_ERR(CAM_OIS, "Skip to locate %s", fw_name_mem);
+		CAM_DBG(CAM_OIS, "Skip to locate %s", fw_name_mem);
 		return 0;
 	}
 
@@ -938,11 +931,11 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 						"Calib parsing failed: %d", rc);
 					return rc;
 				}
-			}
-			//xiaomi add begin
-			else if ((o_ctrl->is_ois_pre_init != 0) &&
-				(o_ctrl->i2c_pre_init_data.is_settings_valid == 0)) {
-				CAM_DBG(CAM_OIS, "Received pre init settings");
+			} else if ((o_ctrl->is_ois_pre_init != 0) && //xiaomi add begin
+				(o_ctrl->i2c_pre_init_data.is_settings_valid ==
+				0)) {
+				CAM_DBG(CAM_OIS,
+					"Received pre init settings");
 				i2c_reg_settings = &(o_ctrl->i2c_pre_init_data);
 				i2c_reg_settings->is_settings_valid = 1;
 				i2c_reg_settings->request_id = 0;
@@ -955,23 +948,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 						"pre init settings parsing failed: %d", rc);
 					return rc;
 				}
-			} else if ((o_ctrl->is_ois_post_init != 0) &&
-				(o_ctrl->i2c_post_init_data.is_settings_valid == 0)) {
-				CAM_DBG(CAM_OIS, "Received post init settings");
-				i2c_reg_settings = &(o_ctrl->i2c_post_init_data);
-				i2c_reg_settings->is_settings_valid = 1;
-				i2c_reg_settings->request_id = 0;
-				rc = cam_sensor_i2c_command_parser(
-					&o_ctrl->io_master_info,
-					i2c_reg_settings,
-					&cmd_desc[i], 1, NULL);
-				if (rc < 0) {
-					CAM_ERR(CAM_OIS,
-						"post init settings parsing failed: %d", rc);
-					return rc;
-				}
-			}
-			//xiaomi add end
+			} //xiaomi add end
 			break;
 			}
 		}
@@ -984,6 +961,17 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 			o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
 		}
+
+		//xiaomi add begin
+		if (o_ctrl->is_ois_pre_init) {
+			CAM_DBG(CAM_OIS, "apply pre init settings");
+			rc = cam_ois_apply_settings(o_ctrl,
+				&o_ctrl->i2c_pre_init_data);
+			if (rc) {
+				CAM_ERR(CAM_OIS, "Cannot apply pre init data");
+				goto pwr_dwn;
+			}
+		} //xiaomi add end
 
 		if (o_ctrl->ois_fw_flag) {
 			rc = cam_ois_fw_download(o_ctrl);
@@ -1018,41 +1006,14 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 		}
 
-		//xiaomi add begin
-		if (o_ctrl->is_ois_pre_init) {
-			CAM_DBG(CAM_OIS, "apply pre init settings");
-			rc = cam_ois_apply_settings(o_ctrl,
-				&o_ctrl->i2c_pre_init_data);
-			if (rc) {
-				CAM_ERR(CAM_OIS, "Cannot apply pre init data");
-				goto pwr_dwn;
-			}
-		}
 
-		if (o_ctrl->is_ois_post_init) {
-			CAM_DBG(CAM_OIS, "apply post init settings");
-			rc = cam_ois_apply_settings(o_ctrl,
-				&o_ctrl->i2c_post_init_data);
-			if (rc) {
-				CAM_ERR(CAM_OIS, "Cannot apply post init data");
-				goto pwr_dwn;
-			}
-		}
-
+		// xiaomi add begin
 		rc = delete_request(&o_ctrl->i2c_pre_init_data);
 		if (rc < 0) {
 			CAM_WARN(CAM_OIS,
 				"Fail deleting Pre Init data: rc: %d", rc);
 			rc = 0;
-		}
-
-		rc = delete_request(&o_ctrl->i2c_post_init_data);
-		if (rc < 0) {
-			CAM_WARN(CAM_OIS,
-				"Fail deleting Post Init data: rc: %d", rc);
-			rc = 0;
-		}
-		//xiaomi add end
+		} //xiaomi add end
 
 		rc = delete_request(&o_ctrl->i2c_init_data);
 		if (rc < 0) {
@@ -1265,13 +1226,9 @@ void cam_ois_shutdown(struct cam_ois_ctrl_t *o_ctrl)
 	if (o_ctrl->i2c_init_data.is_settings_valid == 1)
 		delete_request(&o_ctrl->i2c_init_data);
 
-	// xiaomi add begin
+	// xiaomi add
 	if (o_ctrl->i2c_pre_init_data.is_settings_valid == 1)
 		delete_request(&o_ctrl->i2c_pre_init_data);
-
-	if (o_ctrl->i2c_post_init_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_post_init_data);
-	// xiaomi add end
 
 	kfree(power_info->power_setting);
 	kfree(power_info->power_down_setting);
@@ -1400,13 +1357,9 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		if (o_ctrl->i2c_init_data.is_settings_valid == 1)
 			delete_request(&o_ctrl->i2c_init_data);
 
-		// xiaomi add begin
+		// xiaomi add
 		if (o_ctrl->i2c_pre_init_data.is_settings_valid == 1)
 			delete_request(&o_ctrl->i2c_pre_init_data);
-
-		if (o_ctrl->i2c_post_init_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_post_init_data);
-		// xiaomi add end
 
 		break;
 	case CAM_STOP_DEV:
