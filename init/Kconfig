@@ -2374,3 +2374,5 @@ config ARCH_HAS_SYSCALL_WRAPPER
 
 source "init/Kconfig.gki"
 source "kernel/sched/cpufreq_effiency/Kconfig"
+source "kernel/sched/cpufreq_bouncing/Kconfig"
+source "kernel/sched/special_opt/Kconfig"

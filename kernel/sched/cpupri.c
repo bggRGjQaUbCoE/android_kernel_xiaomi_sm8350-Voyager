@@ -23,6 +23,7 @@
  *  yields the worst case search is fairly contrived.
  */
 #include "sched.h"
+#include <trace/hooks/sched.h>
 
 /* Convert between a 140 based task->prio, and our 102 based cpupri */
 static int convert_prio(int prio)
@@ -159,7 +160,7 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
 {
 	int task_pri = convert_prio(p->prio);
 	int idx, cpu;
-
+	bool drop_vendor = true;
 #ifdef CONFIG_SCHED_WALT
 	bool drop_nopreempts = task_pri <= MAX_RT_PRIO;
 #endif
@@ -169,6 +170,7 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
 #ifdef CONFIG_SCHED_WALT
 retry:
 #endif
+retry_vendor:
 	for (idx = 0; idx < task_pri; idx++) {
 
 #ifndef CONFIG_SCHED_WALT
@@ -178,6 +180,8 @@ retry:
 #endif
 			continue;
 
+		if (drop_vendor)
+			trace_android_rvh_cpupri_find_fitness(p, lowest_mask);
 
 		if (!lowest_mask || !fitness_fn)
 			return 1;
@@ -208,6 +212,11 @@ retry:
 		goto retry;
 	}
 #endif
+
+	if (drop_vendor) {
+		drop_vendor = false;
+		goto retry_vendor;
+	}
 
 	/*
 	 * If we failed to find a fitting lowest_mask, kick off a new search
