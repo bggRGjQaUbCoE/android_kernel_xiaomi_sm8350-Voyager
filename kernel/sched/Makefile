@@ -34,4 +34,4 @@ obj-$(CONFIG_PSI) += psi.o
 obj-$(CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY) += cpufreq_effiency/
 obj-$(CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY) += cpufreq_bouncing/
 obj-$(CONFIG_OPLUS_FEATURE_UIFRIST_HEAVYLOAD) += special_opt/
-
+obj-y += perfmgr/
