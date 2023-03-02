@@ -56,6 +56,7 @@ struct sugov_policy {
 	unsigned long hispeed_util;
 	unsigned long rtg_boost_util;
 	unsigned long max;
+        unsigned long prev_util;
 
 	raw_spinlock_t		update_lock;	/* For shared policies */
 	u64			last_freq_update_time;
@@ -277,6 +278,14 @@ static inline unsigned long walt_map_util_freq(unsigned long util,
 {
 	unsigned long fmax = sg_policy->policy->cpuinfo.max_freq;
 	unsigned int shift = sg_policy->tunables->target_load_shift;
+
+        if (sg_policy->prev_util > util) {
+                sg_policy->tunables->target_load_thresh = 1024;
+        } else if (sg_policy->prev_util < util) {
+                sg_policy->tunables->target_load_thresh = 1536;
+        }
+
+        sg_policy->prev_util = util;
 
 	if (util >= sg_policy->tunables->target_load_thresh &&
 	    cpu_util_rt(cpu_rq(cpu)) < (cap >> 2))
