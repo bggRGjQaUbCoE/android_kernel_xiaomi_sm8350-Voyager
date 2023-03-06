@@ -20,6 +20,34 @@ extern void
 walt_update_task_ravg(struct task_struct *p, struct rq *rq, int event,
 						u64 wallclock, u64 irqtime);
 
+extern unsigned int sysctl_em_inflate_pct;
+extern unsigned int sysctl_em_inflate_thres;
+
+extern __read_mostly unsigned int walt_scale_demand_divisor;
+#define scale_demand(d) ((d)/walt_scale_demand_divisor)
+
+void create_util_to_cost(void);
+struct compute_energy_output {
+	unsigned long	sum_util[MAX_CLUSTERS];
+	unsigned long	max_util[MAX_CLUSTERS];
+	unsigned long	cost[MAX_CLUSTERS];
+	unsigned int	cluster_first_cpu[MAX_CLUSTERS];
+};
+
+extern long
+walt_compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd,
+			cpumask_t *candidates, u64 *prs, struct compute_energy_output *output);
+
+static inline u64 scale_time_to_util(u64 d)
+{
+	/*
+	 * The denominator at most could be (8 * tick_size) >> SCHED_CAPACITY_SHIFT,
+	 * a value that easily fits a 32bit integer.
+	 */
+	do_div(d, walt_scale_demand_divisor);
+	return d;
+}
+
 static inline void
 fixup_cumulative_runnable_avg(struct walt_sched_stats *stats,
 			      s64 demand_scaled_delta,
@@ -211,6 +239,16 @@ extern int cpu_boost_init(void);
 #else
 static inline int cpu_boost_init(void) { }
 #endif
+
+static inline unsigned int walt_get_idle_exit_latency(struct rq *rq)
+{
+	struct cpuidle_state *idle = idle_get_state(rq);
+
+	if (idle)
+		return idle->exit_latency;
+
+	return 0; /* CPU is not idle */
+}
 
 #else /* CONFIG_SCHED_WALT */
 
