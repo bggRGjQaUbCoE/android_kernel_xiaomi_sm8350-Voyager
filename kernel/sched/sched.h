@@ -203,6 +203,8 @@ struct walt_sched_cluster {
 	unsigned int		cur_freq;
 	unsigned int		max_possible_freq;
 	u64			aggr_grp_load;
+
+	unsigned long		util_to_cost[1024];
 };
 
 extern cpumask_t asym_cap_sibling_cpus;
@@ -534,6 +536,7 @@ struct task_group {
 #ifdef CONFIG_SCHED_WALT
 	struct walt_task_group	wtg;
 #endif /* CONFIG_SCHED_WALT */
+	ANDROID_VENDOR_DATA_ARRAY(1, 4);
 #endif /* CONFIG_UCLAMP_TASK_GROUP */
 };
 
@@ -931,6 +934,8 @@ struct root_domain {
 #ifdef CONFIG_SCHED_WALT
 	struct walt_root_domain	wrd;
 #endif
+
+	ANDROID_VENDOR_DATA_ARRAY(1, 4);
 };
 
 extern void init_defrootdomain(void);
@@ -1158,6 +1163,8 @@ struct rq {
 	int			idle_state_idx;
 #endif
 #endif
+
+	ANDROID_VENDOR_DATA_ARRAY(1, 96);
 };
 
 #ifdef CONFIG_FAIR_GROUP_SCHED

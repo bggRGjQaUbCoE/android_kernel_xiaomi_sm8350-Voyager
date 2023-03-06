@@ -228,8 +228,7 @@ static int __init set_sched_predl(char *str)
 }
 early_param("sched_predl", set_sched_predl);
 
-static __read_mostly unsigned int walt_scale_demand_divisor;
-#define scale_demand(d) ((d)/walt_scale_demand_divisor)
+__read_mostly unsigned int walt_scale_demand_divisor;
 
 #define SCHED_PRINT(arg)        printk_deferred("%s=%llu", #arg, arg)
 #define STRG(arg)               #arg
@@ -2801,6 +2800,8 @@ void walt_update_cluster_topology(void)
 		return;
 	}
 	smp_store_release(&cpu_array, tmp);
+
+	create_util_to_cost();
 	walt_clusters_parsed = true;
 	schedule_work(&walt_work);
 }

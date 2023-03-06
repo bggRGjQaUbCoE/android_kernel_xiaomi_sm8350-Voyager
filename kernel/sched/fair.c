@@ -3929,6 +3929,7 @@ struct find_best_target_env {
 	int end_index;
 	bool strict_max;
 	int skip_cpu;
+	u64	prs[8];
 };
 
 static inline bool prefer_spread_on_idle(int cpu, bool new_ilb)
@@ -6698,8 +6699,12 @@ static void walt_find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 			unsigned long wake_util, new_util, new_util_cuml;
 			long spare_cap;
 			int idle_idx = INT_MAX;
+			struct rq *rq = cpu_rq(i);
 
 			trace_sched_cpu_util(i);
+
+			/* record the prss as we visit cpus in a cluster */
+			fbt_env->prs[i] = rq->wrq.prev_runnable_sum + rq->wrq.grp_time.prev_runnable_sum;
 
 			trace_android_rvh_find_best_target(p, i, &ignore);
 			if (ignore > 0) {
@@ -7127,6 +7132,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	bool is_uclamp_boosted = uclamp_boosted(p);
 	bool boosted = is_uclamp_boosted || (task_boost > 0);
 	int start_cpu, order_index, end_index;
+	struct compute_energy_output output;
 
 	if (walt_is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
 			cpumask_test_cpu(prev_cpu, &p->cpus_mask))
@@ -7200,20 +7206,38 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		goto unlock;
 	}
 
-	if (cpumask_test_cpu(prev_cpu, &p->cpus_mask))
-		prev_delta = best_delta =
-				compute_energy(p, prev_cpu, pd);
-	else
+	if (cpumask_test_cpu(prev_cpu, p->cpus_ptr) && !__cpu_overutilized(prev_cpu, delta)) {
+		if (trace_sched_compute_energy_enabled()) {
+			memset(&output, 0, sizeof(output));
+			prev_delta = walt_compute_energy(p, prev_cpu, pd, candidates, fbt_env.prs,
+					&output);
+		} else {
+			prev_delta = walt_compute_energy(p, prev_cpu, pd, candidates, fbt_env.prs,
+					NULL);
+		}
+
+		best_delta = prev_delta;
+		trace_sched_compute_energy(p, prev_cpu, prev_delta, 0, 0, 0, &output);
+	} else {
 		prev_delta = best_delta = ULONG_MAX;
+	}
 
 	/* Select the best candidate energy-wise. */
 	for_each_cpu(cpu, candidates) {
 		if (cpu == prev_cpu)
 			continue;
 
-		cur_energy = compute_energy(p, cpu, pd);
+		if (trace_sched_compute_energy_enabled()) {
+			memset(&output, 0, sizeof(output));
+			cur_energy = walt_compute_energy(p, cpu, pd, candidates, fbt_env.prs,
+					&output);
+		} else {
+			cur_energy = walt_compute_energy(p, cpu, pd, candidates, fbt_env.prs,
+					NULL);
+		}
+
 		trace_sched_compute_energy(p, cpu, cur_energy,
-			prev_delta, best_delta, best_energy_cpu);
+			prev_delta, best_delta, best_energy_cpu, &output);
 
 		if (cur_energy < best_delta) {
 			best_delta = cur_energy;
@@ -7225,8 +7249,8 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 				best_energy_cpu = cpu;
 			}
 		}
-	}
 
+	}
 unlock:
 	rcu_read_unlock();
 
