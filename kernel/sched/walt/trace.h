@@ -671,6 +671,58 @@ TRACE_EVENT(walt_window_rollover,
 	TP_printk("window_start=%llu", __entry->window_start)
 );
 
+DECLARE_EVENT_CLASS(walt_cfs_mvp_task_template,
+
+	TP_PROTO(struct task_struct *p, struct walt_task_struct *wts, unsigned int limit),
+
+	TP_ARGS(p, wts, limit),
+
+	TP_STRUCT__entry(
+		__array(char,		comm,	TASK_COMM_LEN)
+		__field(pid_t,		pid)
+		__field(int,		prio)
+		__field(int,		mvp_prio)
+		__field(int,		cpu)
+		__field(u64,		exec)
+		__field(unsigned int,	limit)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+		__entry->mvp_prio	= wts->mvp_prio;
+		__entry->cpu		= task_cpu(p);
+		__entry->exec		= wts->total_exec;
+		__entry->limit		= limit;
+	),
+
+	TP_printk("comm=%s pid=%d prio=%d mvp_prio=%d cpu=%d exec=%llu limit=%u",
+		__entry->comm, __entry->pid, __entry->prio,
+		__entry->mvp_prio, __entry->cpu, __entry->exec,
+		__entry->limit)
+);
+
+/* called upon MVP task de-activation. exec will be more than limit */
+DEFINE_EVENT(walt_cfs_mvp_task_template, walt_cfs_deactivate_mvp_task,
+	     TP_PROTO(struct task_struct *p, struct walt_task_struct *wts, unsigned int limit),
+	     TP_ARGS(p, wts, limit));
+
+/* called upon when MVP is returned to run next */
+DEFINE_EVENT(walt_cfs_mvp_task_template, walt_cfs_mvp_pick_next,
+	     TP_PROTO(struct task_struct *p, struct walt_task_struct *wts, unsigned int limit),
+	     TP_ARGS(p, wts, limit));
+
+/* called upon when MVP (current) is not preempted by waking task */
+DEFINE_EVENT(walt_cfs_mvp_task_template, walt_cfs_mvp_wakeup_nopreempt,
+	     TP_PROTO(struct task_struct *p, struct walt_task_struct *wts, unsigned int limit),
+	     TP_ARGS(p, wts, limit));
+
+/* called upon when MVP (waking task) preempts the current */
+DEFINE_EVENT(walt_cfs_mvp_task_template, walt_cfs_mvp_wakeup_preempt,
+	     TP_PROTO(struct task_struct *p, struct walt_task_struct *wts, unsigned int limit),
+	     TP_ARGS(p, wts, limit));
+
 #endif /* CONFIG_SCHED_WALT */
 #endif /* _TRACE_WALT_H */
 

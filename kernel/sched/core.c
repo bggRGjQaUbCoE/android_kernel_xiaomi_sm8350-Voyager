@@ -1424,6 +1424,7 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 
 	uclamp_rq_inc(rq, p);
 	p->sched_class->enqueue_task(rq, p, flags);
+	walt_cfs_dequeue_task(rq, p);
 	walt_update_last_enqueue(p);
 	trace_sched_enq_deq_task(p, 1, cpumask_bits(&p->cpus_mask)[0]);
 
@@ -1446,9 +1447,9 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	if (p == rq->wrq.ed_task)
 		early_detection_notify(rq, sched_ktime_clock());
 #endif
-	trace_sched_enq_deq_task(p, 0, cpumask_bits(&p->cpus_mask)[0]);
-
+	walt_cfs_dequeue_task(rq, p);
 	trace_android_rvh_dequeue_task(rq, p);
+	trace_sched_enq_deq_task(p, 0, cpumask_bits(&p->cpus_mask)[0]);
 }
 
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
@@ -3890,6 +3891,8 @@ void scheduler_tick(void)
 		set_preferred_cluster(grp);
 	rcu_read_unlock();
 
+	walt_cfs_tick(rq);
+
 	if (curr->sched_class == &fair_sched_class)
 		check_for_migration(rq, curr);
 
@@ -5981,6 +5984,8 @@ static void do_sched_yield(void)
 
 	schedstat_inc(rq->yld_count);
 	current->sched_class->yield_task(rq);
+
+	trace_android_rvh_do_sched_yield(rq);
 
 	preempt_disable();
 	rq_unlock_irq(rq, &rf);

@@ -4,7 +4,12 @@
  */
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/seq_file.h>
+#include <../../../drivers/android/binder_internal.h>
+
 #include <trace/events/sched.h>
+#include <trace/hooks/sched.h>
+#include <trace/hooks/binder.h>
 
 #include "qc_vas.h"
 
@@ -13,6 +18,9 @@
 unsigned int sysctl_sched_min_task_util_for_boost = 51;
 /* 0.68ms default for 20ms window size scaled to 1024 */
 unsigned int sysctl_sched_min_task_util_for_colocation = 35;
+
+unsigned int sysctl_em_inflate_pct = 100;
+unsigned int sysctl_em_inflate_thres = 1024;
 
 static void create_util_to_cost_pd(struct em_perf_domain *pd)
 {
@@ -117,6 +125,16 @@ cpu_util_next_walt_prs(int cpu, struct task_struct *p, int dst_cpu, bool prev_ds
 	return util;
 }
 
+static inline unsigned long get_util_to_cost(int cpu, unsigned long util)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	if (cpu == 0 && util > sysctl_em_inflate_thres)
+		return mult_frac(rq->wrq.cluster->util_to_cost[util], sysctl_em_inflate_pct, 100);
+	else
+		return rq->wrq.cluster->util_to_cost[util];
+}
+
 /**
  * walt_em_cpu_energy() - Estimates the energy consumed by the CPUs of a
 		performance domain
@@ -135,9 +153,13 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 				unsigned long max_util, unsigned long sum_util,
 				struct compute_energy_output *output, unsigned int x)
 {
-	unsigned long scale_cpu;
+	unsigned long scale_cpu, cost;
 	int cpu;
-	struct rq *rq;
+
+#if defined(CONFIG_OPLUS_FEATURE_SUGOV_TL) || defined(CONFIG_OPLUS_UAG_USE_TL)
+	struct cpufreq_policy policy;
+	unsigned long raw_util = max_util;
+#endif
 
 	if (!sum_util)
 		return 0;
@@ -150,7 +172,15 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	cpu = cpumask_first(to_cpumask(pd->cpus));
 	scale_cpu = arch_scale_cpu_capacity(cpu);
 
+#if defined(CONFIG_OPLUS_FEATURE_SUGOV_TL) || defined(CONFIG_OPLUS_UAG_USE_TL)
+	if (!cpufreq_get_policy(&policy, cpu))
+		trace_android_vh_map_util_freq_new(max_util, max_util, max_util, &max_util, &policy, NULL);
+
+	if (max_util == raw_util)
+		max_util = max_util + (max_util >> 2); /* account  for TARGET_LOAD usually 80 */
+#else /* !CONFIG_OPLUS_FEATURE_SUGOV_TL */
 	max_util = max_util + (max_util >> 2); /* account  for TARGET_LOAD usually 80 */
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 	max_util = max(max_util,
 			(arch_scale_freq_capacity(cpu) * scale_cpu) >>
 			SCHED_CAPACITY_SHIFT);
@@ -200,14 +230,14 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	if (max_util >= 1024)
 		max_util = 1023;
 
-	rq = cpu_rq(cpu);
+	cost = get_util_to_cost(cpu, max_util);
 
 	if (output) {
-		output->cost[x] = rq->wrq.cluster->util_to_cost[max_util];
+		output->cost[x] = cost;
 		output->max_util[x] = max_util;
 		output->sum_util[x] = sum_util;
 	}
-	return rq->wrq.cluster->util_to_cost[max_util] * sum_util / scale_cpu;
+	return cost * sum_util / scale_cpu;
 }
 
 /*
@@ -245,7 +275,7 @@ walt_pd_compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *p
 		max_util = max(max_util, cpu_util);
 	}
 
-	max_util = scale_demand(max_util);
+	max_util = scale_time_to_util(max_util);
 
 	if (output)
 		output->cluster_first_cpu[x] = cpumask_first(pd_mask);
@@ -1015,4 +1045,376 @@ void attach_tasks_core(struct list_head *tasks, struct rq *rq)
 	}
 }
 #endif /* CONFIG_HOTPLUG_CPU */
+/*
+ * Higher prio mvp can preempt lower prio mvp.
+ *
+ * However, the lower prio MVP slice will be more since we expect them to
+ * be the work horses. For example, binders will have higher prio MVP and
+ * they can preempt long running rtg prio tasks but binders loose their
+ * powers with in 3 msec where as rtg prio tasks can run more than that.
+ */
+int walt_get_mvp_task_prio(struct task_struct *p)
+{
+#if (!IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST))
+	if (walt_procfs_low_latency_task(p) ||
+			walt_pipeline_low_latency_task(p))
+		return WALT_LL_PIPE_MVP;
+
+	if (per_task_boost(p) == TASK_BOOST_STRICT_MAX)
+		return WALT_TASK_BOOST_MVP;
+
+	if (walt_binder_low_latency_task(p))
+		return WALT_BINDER_MVP;
+
+	if (task_rtg_high_prio(p))
+		return WALT_RTG_MVP;
+#endif
+
+	return WALT_NOT_MVP;
+}
+
+static inline unsigned int walt_cfs_mvp_task_limit(struct task_struct *p)
+{
+	/* Binder MVP tasks are high prio but have only single slice */
+	if (p->wts.mvp_prio == WALT_BINDER_MVP)
+		return WALT_MVP_SLICE;
+
+	return WALT_MVP_LIMIT;
+}
+
+static void walt_cfs_insert_mvp_task(struct rq *rq, struct task_struct *p,
+				     bool at_front)
+{
+	struct list_head *pos;
+
+	list_for_each(pos, &rq->wrq.mvp_tasks) {
+		struct walt_task_struct *tmp_p = container_of(pos, struct walt_task_struct,
+								mvp_list);
+
+		if (at_front) {
+			if (p->wts.mvp_prio >= tmp_p->mvp_prio)
+				break;
+		} else {
+			if (p->wts.mvp_prio > tmp_p->mvp_prio)
+				break;
+		}
+	}
+
+	list_add(&p->wts.mvp_list, pos->prev);
+	rq->wrq.num_mvp_tasks++;
+}
+
+void walt_cfs_deactivate_mvp_task(struct rq *rq, struct task_struct *p)
+{
+	list_del_init(&p->wts.mvp_list);
+	p->wts.mvp_prio = WALT_NOT_MVP;
+	rq->wrq.num_mvp_tasks--;
+}
+
+/*
+ * MVP task runtime update happens here. Three possibilities:
+ *
+ * de-activated: The MVP consumed its runtime. Non MVP can preempt.
+ * slice expired: MVP slice is expired and other MVP can preempt.
+ * slice not expired: This MVP task can continue to run.
+ */
+static void walt_cfs_account_mvp_runtime(struct rq *rq, struct task_struct *curr)
+{
+	u64 slice;
+	unsigned int limit;
+
+	lockdep_assert_held(&rq->lock);
+
+	/*
+	 * RQ clock update happens in tick path in the scheduler.
+	 * Since we drop the lock in the scheduler before calling
+	 * into vendor hook, it is possible that update flags are
+	 * reset by another rq lock and unlock. Do the update here
+	 * if required.
+	 */
+	if (!(rq->clock_update_flags & RQCF_UPDATED))
+		update_rq_clock(rq);
+
+	if (curr->se.sum_exec_runtime > curr->wts.sum_exec_snapshot_for_total)
+		curr->wts.total_exec = curr->se.sum_exec_runtime - curr->wts.sum_exec_snapshot_for_total;
+	else
+		curr->wts.total_exec = 0;
+
+	if (curr->se.sum_exec_runtime > curr->wts.sum_exec_snapshot_for_slice)
+		slice = curr->se.sum_exec_runtime - curr->wts.sum_exec_snapshot_for_slice;
+	else
+		slice = 0;
+
+	/* slice is not expired */
+	if (slice < WALT_MVP_SLICE)
+		return;
+
+	curr->wts.sum_exec_snapshot_for_slice = curr->se.sum_exec_runtime;
+	/*
+	 * slice is expired, check if we have to deactivate the
+	 * MVP task, otherwise requeue the task in the list so
+	 * that other MVP tasks gets a chance.
+	 */
+
+	limit = walt_cfs_mvp_task_limit(curr);
+	if (curr->wts.total_exec > limit) {
+		walt_cfs_deactivate_mvp_task(rq, curr);
+		trace_walt_cfs_deactivate_mvp_task(curr, &curr->wts, limit);
+		return;
+	}
+
+	if (rq->wrq.num_mvp_tasks == 1)
+		return;
+
+	/* slice expired. re-queue the task */
+	list_del(&curr->wts.mvp_list);
+	rq->wrq.num_mvp_tasks--;
+	walt_cfs_insert_mvp_task(rq, curr, false);
+}
+
+void walt_cfs_enqueue_task(struct rq *rq, struct task_struct *p)
+{
+	int mvp_prio = walt_get_mvp_task_prio(p);
+
+	lockdep_assert_held(&rq->lock);
+
+	if (mvp_prio == WALT_NOT_MVP)
+		return;
+
+	/*
+	 * This can happen during migration or enq/deq for prio/class change.
+	 * it was once MVP but got demoted, it will not be MVP until
+	 * it goes to sleep again.
+	 */
+	if (p->wts.total_exec > walt_cfs_mvp_task_limit(p))
+		return;
+
+	p->wts.mvp_prio = mvp_prio;
+	walt_cfs_insert_mvp_task(rq, p, task_running(rq, p));
+
+	/*
+	 * We inserted the task at the appropriate position. Take the
+	 * task runtime snapshot. From now onwards we use this point as a
+	 * baseline to enforce the slice and demotion.
+	 */
+	if (!p->wts.total_exec) /* queue after sleep */ {
+		p->wts.sum_exec_snapshot_for_total = p->se.sum_exec_runtime;
+		p->wts.sum_exec_snapshot_for_slice = p->se.sum_exec_runtime;
+	}
+}
+
+void walt_cfs_dequeue_task(struct rq *rq, struct task_struct *p)
+{
+	lockdep_assert_held(&rq->lock);
+
+	if (!list_empty(&p->wts.mvp_list) && p->wts.mvp_list.next)
+		walt_cfs_deactivate_mvp_task(rq, p);
+
+	/*
+	 * Reset the exec time during sleep so that it starts
+	 * from scratch upon next wakeup. total_exec should
+	 * be preserved when task is enq/deq while it is on
+	 * runqueue.
+	 */
+	if (READ_ONCE(p->state) != TASK_RUNNING)
+		p->wts.total_exec = 0;
+}
+
+/*
+ * When preempt = false and nopreempt = false, we leave the preemption
+ * decision to CFS.
+ */
+static void walt_cfs_check_preempt_wakeup(void *unused, struct rq *rq, struct task_struct *p,
+					  bool *preempt, bool *nopreempt, int wake_flags,
+					  struct sched_entity *se, struct sched_entity *pse,
+					  int next_buddy_marked, unsigned int granularity)
+{
+	struct task_struct *wts_p = p;
+	struct task_struct *c = rq->curr;
+	struct task_struct *wts_c = rq->curr;
+	bool resched = false;
+	bool p_is_mvp, curr_is_mvp;
+
+	if (unlikely(walt_disabled))
+		return;
+
+	p_is_mvp = !list_empty(&wts_p->wts.mvp_list) && wts_p->wts.mvp_list.next;
+	curr_is_mvp = !list_empty(&wts_c->wts.mvp_list) && wts_c->wts.mvp_list.next;
+
+	/*
+	 * current is not MVP, so preemption decision
+	 * is simple.
+	 */
+	if (!curr_is_mvp) {
+		if (p_is_mvp)
+			goto preempt;
+		return; /* CFS decides preemption */
+	}
+
+	/*
+	 * current is MVP. update its runtime before deciding the
+	 * preemption.
+	 */
+	walt_cfs_account_mvp_runtime(rq, c);
+	resched = (rq->wrq.mvp_tasks.next != &wts_c->wts.mvp_list);
+
+	/*
+	 * current is no longer eligible to run. It must have been
+	 * picked (because of MVP) ahead of other tasks in the CFS
+	 * tree, so drive preemption to pick up the next task from
+	 * the tree, which also includes picking up the first in
+	 * the MVP queue.
+	 */
+	if (resched)
+		goto preempt;
+
+	/* current is the first in the queue, so no preemption */
+	*nopreempt = true;
+	trace_walt_cfs_mvp_wakeup_nopreempt(c, &wts_c->wts, walt_cfs_mvp_task_limit(c));
+	return;
+preempt:
+	*preempt = true;
+	trace_walt_cfs_mvp_wakeup_preempt(p, &wts_p->wts, walt_cfs_mvp_task_limit(p));
+}
+
+static void
+walt_select_task_rq_fair(void *unused, struct task_struct *p, int prev_cpu,
+				int sd_flag, int wake_flags, int *target_cpu)
+{
+	int sync;
+	int sibling_count_hint;
+
+	sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
+	sibling_count_hint = 1;
+
+	*target_cpu = find_energy_efficient_cpu(p, prev_cpu, sync, sibling_count_hint);
+}
+
+void walt_cfs_tick(struct rq *rq)
+{
+	struct task_struct *p = rq->curr;
+
+	raw_spin_lock(&rq->lock);
+
+	if (list_empty(&p->wts.mvp_list) || (p->wts.mvp_list.next == NULL))
+		goto out;
+
+	walt_cfs_account_mvp_runtime(rq, rq->curr);
+	/*
+	 * If the current is not MVP means, we have to re-schedule to
+	 * see if we can run any other task including MVP tasks.
+	 */
+	if ((rq->wrq.mvp_tasks.next != &p->wts.mvp_list) && rq->cfs.h_nr_running > 1)
+		resched_curr(rq);
+
+out:
+	raw_spin_unlock(&rq->lock);
+}
+
+static void walt_binder_low_latency_set(void *unused, struct task_struct *task,
+					bool sync, struct binder_proc *proc)
+{
+	if (task && ((task_in_related_thread_group(current) &&
+			task->group_leader->prio < MAX_RT_PRIO) ||
+			(current->group_leader->prio < MAX_RT_PRIO &&
+			task_in_related_thread_group(task))))
+		task->wts.low_latency |= WALT_LOW_LATENCY_BINDER;
+	else
+		/*
+		 * Clear low_latency flag if criterion above is not met, this
+		 * will handle usecase where for a binder thread WALT_LOW_LATENCY_BINDER
+		 * is set by one task and before WALT clears this flag after timer expiry
+		 * some other task tries to use same binder thread.
+		 *
+		 * The only gets cleared when binder transaction is initiated
+		 * and the above condition to set flasg is nto satisfied.
+		 */
+		task->wts.low_latency &= ~WALT_LOW_LATENCY_BINDER;
+
+}
+
+static void binder_set_priority_hook(void *data,
+				struct binder_transaction *bndrtrans, struct task_struct *task)
+{
+
+	if (bndrtrans && bndrtrans->need_reply && current->wts.boost == TASK_BOOST_STRICT_MAX) {
+		bndrtrans->android_vendor_data1  = task->wts.boost;
+		task->wts.boost = TASK_BOOST_STRICT_MAX;
+	}
+}
+
+static void binder_restore_priority_hook(void *data,
+				struct binder_transaction *bndrtrans, struct task_struct *task)
+{
+	if (bndrtrans && task->wts.boost == TASK_BOOST_STRICT_MAX)
+		task->wts.boost = bndrtrans->android_vendor_data1;
+}
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+/* Walk up scheduling entities hierarchy */
+#define for_each_sched_entity(se) \
+		for (; se; se = se->parent)
+#else	/* !CONFIG_FAIR_GROUP_SCHED */
+#define for_each_sched_entity(se) \
+		for (; se; se = NULL)
+#endif
+
+/* runqueue on which this entity is (to be) queued */
+static inline struct cfs_rq *cfs_rq_of(struct sched_entity *se)
+{
+	return se->cfs_rq;
+}
+
+extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);
+static void walt_cfs_replace_next_task_fair(void *unused, struct rq *rq, struct task_struct **p,
+					    struct sched_entity **se, bool *repick, bool simple,
+					    struct task_struct *prev)
+{
+	struct task_struct *wts;
+	struct task_struct *mvp;
+	struct cfs_rq *cfs_rq;
+
+	if (unlikely(walt_disabled))
+		return;
+
+	/* We don't have MVP tasks queued */
+	if (list_empty(&rq->wrq.mvp_tasks))
+		return;
+
+	/* Return the first task from MVP queue */
+	wts = list_first_entry(&rq->wrq.mvp_tasks, struct task_struct, wts.mvp_list);
+	mvp = wts_to_ts(&wts);
+
+	*p = mvp;
+	*se = &mvp->se;
+	*repick = true;
+
+	if (simple) {
+		for_each_sched_entity((*se)) {
+			/*
+			 * TODO If CFS_BANDWIDTH is enabled, we might pick
+			 * from a throttled cfs_rq
+			 */
+			cfs_rq = cfs_rq_of(*se);
+			set_next_entity(cfs_rq, *se);
+		}
+	}
+
+	trace_walt_cfs_mvp_pick_next(mvp, &wts->wts, walt_cfs_mvp_task_limit(mvp));
+}
+
+void walt_cfs_init(void)
+{
+	register_trace_android_rvh_select_task_rq_fair(walt_select_task_rq_fair, NULL);
+
+	register_trace_android_vh_binder_wakeup_ilocked(walt_binder_low_latency_set, NULL);
+
+	register_trace_android_vh_binder_set_priority(binder_set_priority_hook, NULL);
+	register_trace_android_vh_binder_restore_priority(binder_restore_priority_hook, NULL);
+
+	register_trace_android_rvh_check_preempt_wakeup(walt_cfs_check_preempt_wakeup, NULL);
+/*
+	register_trace_android_rvh_replace_next_task_fair(walt_cfs_replace_next_task_fair, NULL);
+*/
+}
 #endif /* CONFIG_SCHED_WALT */

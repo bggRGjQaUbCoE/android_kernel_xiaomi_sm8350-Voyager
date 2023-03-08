@@ -627,6 +627,11 @@ struct walt_task_struct {
 	u64				cpu_cycles;
 	cpumask_t			cpus_requested;
 	bool				iowaited;
+	struct list_head		mvp_list;
+	u64				sum_exec_snapshot_for_slice;
+	u64				sum_exec_snapshot_for_total;
+	u64				total_exec;
+	int				mvp_prio;
 };
 
 #else
@@ -646,6 +651,11 @@ static inline void sched_update_cpu_freq_min_max(const cpumask_t *cpus,
 static inline void set_task_boost(int boost, u64 period) { }
 static inline void walt_update_cluster_topology(void) { }
 #endif /* CONFIG_SCHED_WALT */
+
+#define wts_to_ts(wts) ({ \
+		void *__mptr = (void *)(wts); \
+		((struct task_struct *)(__mptr - \
+			offsetof(struct task_struct, android_vendor_data1))); })
 
 struct sched_rt_entity {
 	struct list_head		run_list;
@@ -1461,7 +1471,7 @@ struct task_struct {
 	unsigned long			prev_lowest_stack;
 #endif
 
-	ANDROID_VENDOR_DATA_ARRAY(1, 3);
+	ANDROID_VENDOR_DATA_ARRAY(1, 64);
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);

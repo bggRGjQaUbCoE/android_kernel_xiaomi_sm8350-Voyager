@@ -66,5 +66,5 @@ void update_siblings_masks(unsigned int cpu);
 void remove_cpu_topology(unsigned int cpuid);
 void reset_cpu_topology(void);
 #endif
-
+extern bool topology_update_done;
 #endif /* _LINUX_ARCH_TOPOLOGY_H_ */

@@ -65,7 +65,7 @@ static bool test_ux_task_cpu(int cpu)
 }
 
 static void check_preempt_wakeup_handler(void *data, struct task_struct *p,
-				  int *ignore)
+				  bool *ignore)
 {
 	if (sysctl_cpu_multi_thread == 0)
 		return;
@@ -122,7 +122,7 @@ static void cpupri_find_fitness_handler(void *data, struct task_struct *p, struc
 static int register_vendor_hooks(void)
 {
 	int rc = 0;
-	rc = register_trace_android_rvh_check_preempt_wakeup(
+	rc = register_trace_android_rvh_check_preempt_wakeup_ignore(
 		check_preempt_wakeup_handler, NULL);
 	if (rc != 0) {
 		pr_err("uifirst: register_trace_android_vh_scheduler_tick failed! rc=%d\n",

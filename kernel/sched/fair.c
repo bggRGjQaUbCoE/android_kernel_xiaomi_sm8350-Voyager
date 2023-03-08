@@ -4374,7 +4374,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 		resched_curr(rq_of(cfs_rq));
 }
 
-static void
+void
 set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	/* 'current' is not kept within the tree. */
@@ -7054,24 +7054,40 @@ static inline int wake_to_idle(struct task_struct *p)
 /* return true if cpu should be chosen over best_energy_cpu */
 static inline bool select_cpu_same_energy(int cpu, int best_cpu, int prev_cpu)
 {
-	if (capacity_orig_of(cpu) < capacity_orig_of(best_cpu))
+	bool new_cpu_is_idle = available_idle_cpu(cpu);
+	bool best_cpu_is_idle = available_idle_cpu(best_cpu);
+	struct rq *rq = cpu_rq(cpu);
+	struct rq *best_rq = cpu_rq(best_cpu);
+
+	if (best_rq->wrq.cluster->id < rq->wrq.cluster->id)
+		return false;
+	if (rq->wrq.cluster->id < best_rq->wrq.cluster->id)
+		return true;
+
+	if (best_cpu_is_idle && walt_get_idle_exit_latency(cpu_rq(best_cpu)) <= 1)
+		return false;
+	if (new_cpu_is_idle && walt_get_idle_exit_latency(cpu_rq(cpu)) <= 1)
+		return true;
+
+	if (best_cpu_is_idle && !new_cpu_is_idle)
+		return false;
+	if (new_cpu_is_idle && !best_cpu_is_idle)
 		return true;
 
 	if (best_cpu == prev_cpu)
 		return false;
+	if (cpu == prev_cpu)
+		return true;
 
-	if (idle_cpu(best_cpu) && idle_get_state_idx(cpu_rq(best_cpu)) <= 0)
-		return false; /* best_cpu is idle wfi or shallower */
+	if (best_cpu_is_idle && new_cpu_is_idle)
+		return false;
 
-	if (idle_cpu(cpu) && idle_get_state_idx(cpu_rq(cpu)) <= 0)
-		return true; /* new cpu is idle wfi or shallower */
+	if (cpu_util(best_cpu) <= cpu_util(cpu))
+		return false;
 
-	/*
-	 * If we are this far this must be a tie between a busy and deep idle,
-	 * pick the busy.
-	 */
-	return idle_cpu(best_cpu);
+	return true;
 }
+
 
 /*
  * find_energy_efficient_cpu(): Find most energy-efficient target CPU for the
@@ -7689,16 +7705,15 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	int scale = cfs_rq->nr_running >= sched_nr_latency;
 	int next_buddy_marked = 0;
-	int ignore = -1;
+	bool ignore = -1;
+	bool preempt = false, nopreempt = false;
 
 	if (unlikely(se == pse))
 		return;
 
-	trace_android_rvh_check_preempt_wakeup(curr, &ignore);
-
-	if (ignore > 0) {
+	trace_android_rvh_check_preempt_wakeup_ignore(curr, &ignore);
+	if (ignore)
 		return;
-	}
 
 	/*
 	 * This is possible from callers such as attach_tasks(), in which we
@@ -7741,6 +7756,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 
 	find_matching_se(&se, &pse);
 	update_curr(cfs_rq_of(se));
+	trace_android_rvh_check_preempt_wakeup(rq, p, &preempt, &nopreempt,
+			wake_flags, se, pse, next_buddy_marked, sysctl_sched_wakeup_granularity);
+	if (preempt)
+		goto preempt;
+	if (nopreempt)
+		return;
 	BUG_ON(!pse);
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
@@ -7779,6 +7800,7 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 	struct sched_entity *se;
 	struct task_struct *p;
 	int new_tasks;
+	bool repick = false;
 
 again:
 	if (!sched_fair_runnable(rq))
@@ -7832,7 +7854,7 @@ again:
 	} while (cfs_rq);
 
 	p = task_of(se);
-
+	trace_android_rvh_replace_next_task_fair(rq, &p, &se, &repick, false, prev);
 	/*
 	 * Since we haven't yet done put_prev_entity and if the selected task
 	 * is a different task than we started out with, try and touch the
@@ -7865,6 +7887,7 @@ simple:
 	if (prev)
 		put_prev_task(rq, prev);
 
+	trace_android_rvh_replace_next_task_fair(rq, &p, &se, &repick, false, prev);
 	do {
 		se = pick_next_entity(cfs_rq, NULL);
 		set_next_entity(cfs_rq, se);

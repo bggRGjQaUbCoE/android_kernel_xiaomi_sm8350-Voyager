@@ -21,6 +21,8 @@
 /* Target load. Lower values result in higher CPU speeds. */
 #define DEFAULT_TARGET_LOAD 80
 static unsigned int default_target_loads[] = {DEFAULT_TARGET_LOAD};
+#define MAX_CLUSTERS 3
+static int init_flag[MAX_CLUSTERS];
 #endif
 
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY
@@ -311,6 +313,32 @@ static unsigned int freq_to_targetload(
 	return ret;
 }
 
+unsigned int get_targetload(struct cpufreq_policy *policy)
+{
+	unsigned int freq = policy->cur;
+	unsigned int first_cpu;
+	int cluster_id;
+	struct sugov_policy *sg_policy;
+	unsigned int target_load = 80;
+
+	first_cpu = cpumask_first(policy->related_cpus);
+	cluster_id = topology_physical_package_id(first_cpu);
+
+	if (cluster_id >= MAX_CLUSTERS)
+		return target_load;
+
+	if (init_flag[cluster_id] == 0)
+		return target_load;
+
+	sg_policy = policy->governor_data;
+
+	if (sg_policy && sg_policy->tunables)
+		target_load = freq_to_targetload(sg_policy->tunables, freq);
+
+	return target_load;
+}
+EXPORT_SYMBOL_GPL(get_targetload);
+
 static unsigned int choose_freq(struct sugov_policy *sg_policy,
 		unsigned int loadadjfreq)
 {
@@ -396,6 +424,15 @@ static unsigned int choose_freq(struct sugov_policy *sg_policy,
 #endif /* CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY */
 
 	return freq;
+}
+
+void update_util_tl(void *data, unsigned long util, unsigned long freq,
+		unsigned long cap, unsigned long *max_util, struct cpufreq_policy *policy,
+		bool *need_freq_update)
+{
+	unsigned int tl = get_targetload(policy);
+
+	*max_util = *max_util * 100 / tl;
 }
 #endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
@@ -1486,12 +1523,20 @@ static int sugov_init(struct cpufreq_policy *policy)
 	struct sugov_tunables *tunables;
 	unsigned long util;
 	int ret = 0;
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	unsigned int first_cpu;
+	int cluster_id;
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
 	/* State should be equivalent to EXIT */
 	if (policy->governor_data)
 		return -EBUSY;
 
 	cpufreq_enable_fast_switch(policy);
+
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY
+        frequence_opp_init(policy);
+#endif
 
 	sg_policy = sugov_policy_alloc(policy);
 	if (!sg_policy) {
@@ -1564,6 +1609,13 @@ static int sugov_init(struct cpufreq_policy *policy)
 	if (ret)
 		goto fail;
 
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	first_cpu = cpumask_first(policy->related_cpus);
+	cluster_id = topology_physical_package_id(first_cpu);
+	if (cluster_id < MAX_CLUSTERS)
+		init_flag[cluster_id] = 1;
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
+
 out:
 	mutex_unlock(&global_tunables_lock);
 	return 0;
@@ -1592,6 +1644,15 @@ static void sugov_exit(struct cpufreq_policy *policy)
 	struct sugov_policy *sg_policy = policy->governor_data;
 	struct sugov_tunables *tunables = sg_policy->tunables;
 	unsigned int count;
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	unsigned int first_cpu;
+	int cluster_id;
+
+	first_cpu = cpumask_first(policy->related_cpus);
+	cluster_id = topology_physical_package_id(first_cpu);
+	if (cluster_id < MAX_CLUSTERS)
+		init_flag[cluster_id] = 0;
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
 	mutex_lock(&global_tunables_lock);
 
@@ -1634,6 +1695,10 @@ static int sugov_start(struct cpufreq_policy *policy)
 		sg_cpu->sg_policy		= sg_policy;
 	}
 
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	register_trace_android_vh_map_util_freq_new(update_util_tl, NULL);
+#endif
+
 	for_each_cpu(cpu, policy->cpus) {
 		struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
 
@@ -1652,6 +1717,10 @@ static void sugov_stop(struct cpufreq_policy *policy)
 
 	for_each_cpu(cpu, policy->cpus)
 		cpufreq_remove_update_util_hook(cpu);
+
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	unregister_trace_android_vh_map_util_freq_new(update_util_tl, NULL);
+#endif
 
 	synchronize_rcu();
 

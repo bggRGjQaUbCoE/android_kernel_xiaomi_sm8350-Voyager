@@ -8,6 +8,8 @@
 #include <linux/jiffies.h>
 #include <linux/sched/stat.h>
 #include <trace/events/sched.h>
+#include <trace/hooks/topology.h>
+#include <trace/hooks/sched.h>
 #include "qc_vas.h"
 
 #include <trace/events/sched.h>
@@ -58,6 +60,8 @@ static DEFINE_PER_CPU(atomic64_t, last_cc_update) = ATOMIC64_INIT(0);
 
 static struct irq_work walt_cpufreq_irq_work;
 static struct irq_work walt_migration_irq_work;
+
+bool walt_disabled = true;
 
 u64 sched_ktime_clock(void)
 {
@@ -2391,6 +2395,12 @@ void init_new_task_load(struct task_struct *p)
 	p->wts.misfit = false;
 	p->wts.rtg_high_prio = false;
 	p->wts.unfilter = sysctl_sched_task_unfilter_period;
+
+	INIT_LIST_HEAD(&p->wts.mvp_list);
+	p->wts.sum_exec_snapshot_for_slice = 0;
+	p->wts.sum_exec_snapshot_for_total = 0;
+	p->wts.total_exec = 0;
+	p->wts.mvp_prio = WALT_NOT_MVP;
 }
 
 /*
@@ -2803,6 +2813,7 @@ void walt_update_cluster_topology(void)
 
 	create_util_to_cost();
 	walt_clusters_parsed = true;
+	walt_disabled = false;
 	schedule_work(&walt_work);
 }
 
@@ -4016,3 +4027,71 @@ unlock:
 	mutex_unlock(&mutex);
 	return ret;
 }
+
+static void android_rvh_enqueue_task(void *unused, struct rq *rq, struct task_struct *p,
+				     int flags)
+{
+	if (unlikely(walt_disabled))
+		return;
+
+	if (walt_fair_task(p)) {
+		walt_cfs_enqueue_task(rq, p);
+	}
+}
+
+static void android_rvh_dequeue_task(void *unused, struct rq *rq, struct task_struct *p,
+				     int flags)
+{
+	if (unlikely(walt_disabled))
+		return;
+
+	if (walt_fair_task(p)) {
+		walt_cfs_dequeue_task(rq, p);
+	}
+}
+
+static void walt_do_sched_yield(void *unused, struct rq *rq)
+{
+	struct task_struct *curr = rq->curr;
+
+	if (unlikely(walt_disabled))
+		return;
+
+	lockdep_assert_held(&rq->lock);
+	if (!list_empty(&curr->wts.mvp_list) && curr->wts.mvp_list.next)
+		walt_cfs_deactivate_mvp_task(rq, curr);
+}
+
+static void register_walt_hooks(void)
+{
+	register_trace_android_rvh_after_enqueue_task(android_rvh_enqueue_task, NULL);
+	register_trace_android_rvh_after_dequeue_task(android_rvh_dequeue_task, NULL);
+	register_trace_android_rvh_do_sched_yield(walt_do_sched_yield, NULL);
+}
+
+static void walt_init(struct work_struct *work)
+{
+	register_walt_hooks();
+
+	walt_cfs_init();
+}
+
+static DECLARE_WORK(walt_init_work, walt_init);
+static void android_vh_update_topology_flags_workfn(void *unused, void *unused2)
+{
+	schedule_work(&walt_init_work);
+}
+
+static int walt_module_init(void)
+{
+	register_trace_android_vh_update_topology_flags_workfn(
+			android_vh_update_topology_flags_workfn, NULL);
+
+	if (topology_update_done)
+		schedule_work(&walt_init_work);
+
+	return 0;
+}
+
+module_init(walt_module_init);
+MODULE_LICENSE("GPL v2");

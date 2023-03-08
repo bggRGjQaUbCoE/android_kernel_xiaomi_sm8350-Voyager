@@ -27,13 +27,42 @@ extern unsigned int sysctl_em_inflate_thres;
 extern __read_mostly unsigned int walt_scale_demand_divisor;
 #define scale_demand(d) ((d)/walt_scale_demand_divisor)
 
+#define WALT_MVP_SLICE		3000000U
+#define WALT_MVP_LIMIT		(4 * WALT_MVP_SLICE)
+
+/* higher number, better priority */
+#define WALT_RTG_MVP		0
+#define WALT_BINDER_MVP		1
+#define WALT_TASK_BOOST_MVP	2
+#define WALT_LL_PIPE_MVP	3
+
+#define WALT_NOT_MVP		-1
+
+#define is_mvp(wts) (wts->mvp_prio != WALT_NOT_MVP)
+
+extern bool walt_disabled;
 void create_util_to_cost(void);
+extern int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
+				     int sync, int sibling_count_hint);
+void walt_cfs_enqueue_task(struct rq *rq, struct task_struct *p);
+void walt_cfs_dequeue_task(struct rq *rq, struct task_struct *p);
+
+extern int walt_get_mvp_task_prio(struct task_struct *p);
+extern void walt_cfs_deactivate_mvp_task(struct rq *rq, struct task_struct *p);
+
+extern void walt_cfs_init(void);
+extern void walt_cfs_tick(struct rq *rq);
 struct compute_energy_output {
 	unsigned long	sum_util[MAX_CLUSTERS];
 	unsigned long	max_util[MAX_CLUSTERS];
 	unsigned long	cost[MAX_CLUSTERS];
 	unsigned int	cluster_first_cpu[MAX_CLUSTERS];
 };
+
+static inline bool walt_fair_task(struct task_struct *p)
+{
+	return p->prio >= MAX_RT_PRIO && !is_idle_task(p);
+}
 
 extern long
 walt_compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd,
@@ -240,6 +269,36 @@ extern int cpu_boost_init(void);
 #else
 static inline int cpu_boost_init(void) { }
 #endif
+
+#define WALT_LOW_LATENCY_PIPELINE	BIT(2)
+
+/* applying the task threshold for all types of low latency tasks. */
+static inline bool walt_low_latency_task(struct task_struct *p)
+{
+	return p->wts.low_latency &&
+		(task_util(p) < sysctl_walt_low_latency_task_threshold);
+}
+
+static inline bool walt_binder_low_latency_task(struct task_struct *p)
+{
+	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+
+	return (p->wts.low_latency & WALT_LOW_LATENCY_BINDER) &&
+		(task_util(p) < sysctl_walt_low_latency_task_threshold);
+}
+
+static inline bool walt_procfs_low_latency_task(struct task_struct *p)
+{
+	return (p->wts.low_latency & WALT_LOW_LATENCY_PROCFS) &&
+		(task_util(p) < sysctl_walt_low_latency_task_threshold);
+}
+
+static inline bool walt_pipeline_low_latency_task(struct task_struct *p)
+{
+	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+
+	return wts->low_latency & WALT_LOW_LATENCY_PIPELINE;
+}
 
 static inline unsigned int walt_get_idle_exit_latency(struct rq *rq)
 {

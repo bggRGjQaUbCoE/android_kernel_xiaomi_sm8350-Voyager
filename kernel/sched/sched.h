@@ -188,6 +188,8 @@ struct walt_rq {
 	int			curr_top;
 	bool			notif_pending;
 	bool			high_irqload;
+	struct list_head	mvp_tasks;
+	int                     num_mvp_tasks;
 	u64			last_cc_update;
 	u64			cycles;
 };
@@ -3061,25 +3063,6 @@ static inline struct walt_related_thread_group
 *task_related_thread_group(struct task_struct *p)
 {
 	return rcu_dereference(p->wts.grp);
-}
-
-/* applying the task threshold for all types of low latency tasks. */
-static inline bool walt_low_latency_task(struct task_struct *p)
-{
-	return p->wts.low_latency &&
-		(task_util(p) < sysctl_walt_low_latency_task_threshold);
-}
-
-static inline bool walt_binder_low_latency_task(struct task_struct *p)
-{
-	return (p->wts.low_latency & WALT_LOW_LATENCY_BINDER) &&
-		(task_util(p) < sysctl_walt_low_latency_task_threshold);
-}
-
-static inline bool walt_procfs_low_latency_task(struct task_struct *p)
-{
-	return (p->wts.low_latency & WALT_LOW_LATENCY_PROCFS) &&
-		(task_util(p) < sysctl_walt_low_latency_task_threshold);
 }
 
 /* Is frequency of two cpus synchronized with each other? */

@@ -36,6 +36,14 @@ DECLARE_RESTRICTED_HOOK(android_rvh_dequeue_task,
 	TP_PROTO(struct rq *rq, struct task_struct *p),
 	TP_ARGS(rq, p), 1);
 
+DECLARE_RESTRICTED_HOOK(android_rvh_after_enqueue_task,
+	TP_PROTO(struct rq *rq, struct task_struct *p, int flags),
+	TP_ARGS(rq, p, flags), 1);
+
+DECLARE_RESTRICTED_HOOK(android_rvh_after_dequeue_task,
+	TP_PROTO(struct rq *rq, struct task_struct *p, int flags),
+	TP_ARGS(rq, p, flags), 1);
+
 DECLARE_RESTRICTED_HOOK(android_rvh_can_migrate_task,
 	TP_PROTO(struct task_struct *p, int dst_cpu, int *can_migrate),
 	TP_ARGS(p, dst_cpu, can_migrate), 1);
@@ -65,9 +73,18 @@ DECLARE_RESTRICTED_HOOK(android_rvh_setscheduler,
 	TP_PROTO(struct task_struct *p),
 	TP_ARGS(p), 1);
 
+struct sched_entity;
 DECLARE_RESTRICTED_HOOK(android_rvh_check_preempt_wakeup,
-	TP_PROTO(struct task_struct *p, int *ignore),
+	TP_PROTO(struct rq *rq, struct task_struct *p, bool *preempt, bool *nopreempt,
+			int wake_flags, struct sched_entity *se, struct sched_entity *pse,
+			int next_buddy_marked, unsigned int granularity),
+	TP_ARGS(rq, p, preempt, nopreempt, wake_flags, se, pse, next_buddy_marked,
+			granularity), 1);
+
+DECLARE_RESTRICTED_HOOK(android_rvh_check_preempt_wakeup_ignore,
+	TP_PROTO(struct task_struct *p, bool *ignore),
 	TP_ARGS(p, ignore), 1);
+
 DECLARE_RESTRICTED_HOOK(android_rvh_check_preempt_tick,
 	TP_PROTO(struct task_struct *p, unsigned long *ideal_runtime),
 	TP_ARGS(p, ideal_runtime), 1);
@@ -78,6 +95,10 @@ struct cpumask;
 DECLARE_RESTRICTED_HOOK(android_rvh_cpupri_find_fitness,
 	TP_PROTO(struct task_struct *p, struct cpumask *lowest_mask),
 	TP_ARGS(p, lowest_mask), 1);
+
+DECLARE_RESTRICTED_HOOK(android_rvh_do_sched_yield,
+	TP_PROTO(struct rq *rq),
+	TP_ARGS(rq), 1);
 
 struct sched_group;
 DECLARE_RESTRICTED_HOOK(android_rvh_find_busiest_group,
@@ -96,6 +117,17 @@ DECLARE_HOOK(android_vh_em_pd_energy,
 		unsigned long *energy),
 	TP_ARGS(pd, max_util, sum_util, energy));
 
+struct cpufreq_policy;
+DECLARE_HOOK(android_vh_map_util_freq_new,
+	TP_PROTO(unsigned long util, unsigned long freq,
+		unsigned long cap, unsigned long *next_freq, struct cpufreq_policy *policy,
+		bool *need_freq_update),
+	TP_ARGS(util, freq, cap, next_freq, policy, need_freq_update));
+
+DECLARE_RESTRICTED_HOOK(android_rvh_replace_next_task_fair,
+	TP_PROTO(struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick,
+			bool simple, struct task_struct *prev),
+	TP_ARGS(rq, p, se, repick, simple, prev), 1);
 /* macro versions of hooks are no longer required */
 
 #endif /* _TRACE_HOOK_SCHED_H */
