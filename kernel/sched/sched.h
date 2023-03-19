@@ -81,6 +81,8 @@
 # define SCHED_WARN_ON(x)	({ (void)(x), 0; })
 #endif
 
+#define CPU_NUM                 8
+
 struct rq;
 struct cpuidle_state;
 

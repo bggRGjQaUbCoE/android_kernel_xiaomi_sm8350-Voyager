@@ -2,6 +2,8 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
+#define DEBUG
+
 #include <linux/kthread.h>
 #include <linux/unistd.h>
 #include <linux/sched.h>

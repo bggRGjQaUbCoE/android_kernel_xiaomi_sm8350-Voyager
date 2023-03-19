@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2021, Xiaomi. All rights reserved.
  */
-//#define DEBUG
+#define DEBUG
 #define pr_fmt(fmt) "perfmgr_policy: " fmt
 
 #include <linux/kernel.h>

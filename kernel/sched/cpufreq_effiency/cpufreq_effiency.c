@@ -4,6 +4,9 @@
 static int debug_mode = 0;
 module_param(debug_mode, int, 0664);
 
+extern bool pmu_poll_enabled;
+module_param(pmu_poll_enabled, bool, 0664);
+
 /* affect_mode, @1: enable cpufreq effiency, @0: disable cprfreq effiency. */
 static int affect_mode = 1;
 module_param(affect_mode, int, 0664);

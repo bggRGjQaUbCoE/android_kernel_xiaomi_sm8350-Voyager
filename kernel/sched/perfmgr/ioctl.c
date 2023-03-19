@@ -3,6 +3,8 @@
  * Copyright (c) 2019 MediaTek Inc.
  */
 
+#define DEBUG
+
 #include "pfmgr_ioctl.h"
 
 #define TAG "PERF_IOCTL"
