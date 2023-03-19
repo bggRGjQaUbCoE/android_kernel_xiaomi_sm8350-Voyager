@@ -23,6 +23,7 @@
 #include <linux/suspend.h>
 #include <linux/tick.h>
 #include <trace/events/power.h>
+#include <trace/hooks/cpuidle.h>
 
 #include "cpuidle.h"
 
@@ -233,6 +234,7 @@ int __nocfi cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_drive
 	sched_clock_idle_wakeup_event();
 	time_end = ns_to_ktime(local_clock());
 	trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, dev->cpu);
+	trace_android_vh_cpu_idle_exit(entered_state, dev);
 
 	/* The cpu is no longer idle or about to enter idle. */
 	sched_idle_set_state(NULL, -1);
@@ -296,6 +298,12 @@ int __nocfi cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_drive
 		dev->states_usage[index].failed++;
 #endif
 	}
+
+	/*
+	 * The vendor hook may modify index, which means target_state and
+	 * broadcast must be assigned after the vendor hook.
+	 */
+	trace_android_vh_cpu_idle_enter(&index, dev);
 
 	return entered_state;
 }

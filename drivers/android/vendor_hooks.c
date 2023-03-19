@@ -10,6 +10,7 @@
 #include <trace/hooks/vendor_hooks.h>
 #include <trace/hooks/sched.h>
 #include <trace/hooks/dtask.h>
+#include <trace/hooks/cpuidle.h>
 #include <trace/hooks/net.h>
 #include <trace/hooks/binder.h>
 #include <trace/hooks/rwsem.h>

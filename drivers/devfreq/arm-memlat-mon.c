@@ -29,15 +29,6 @@
 #include <linux/cpu.h>
 #include <linux/spinlock.h>
 
-enum common_ev_idx {
-	INST_IDX,
-	CYC_IDX,
-	STALL_IDX,
-	NUM_COMMON_EVS
-};
-#define INST_EV		0x08
-#define CYC_EV		0x11
-
 enum mon_type {
 	MEMLAT_CPU_GRP,
 	MEMLAT_MON,
@@ -56,6 +47,11 @@ struct cpu_data {
 	struct event_data	common_evs[NUM_COMMON_EVS];
 	unsigned long		freq;
 	unsigned long		stall_pct;
+	spinlock_t              pmu_lock;
+	unsigned long           inst;
+	unsigned long           cyc;
+	unsigned long           stall;
+	unsigned long           cachemiss;
 };
 
 /**
@@ -168,6 +164,32 @@ static DEFINE_PER_CPU(bool, cpu_is_idle);
 static DEFINE_PER_CPU(bool, cpu_is_hp);
 
 #define MAX_COUNT_LIM 0xFFFFFFFFFFFFFFFF
+
+int get_ev_data(int cpu, int inst_ev, int cyc_ev, int stall_ev, int cachemiss_ev,
+				      unsigned long *inst, unsigned long *cyc,
+				      unsigned long *stall, unsigned long *cachemiss)
+{
+	struct memlat_cpu_grp *cpu_grp = per_cpu(per_cpu_grp, cpu);
+	struct memlat_mon *mons = cpu_grp->mons;
+	struct cpu_data *cpu_data = to_cpu_data(cpu_grp, cpu);
+
+	if (cpu_grp->common_ev_ids[INST_IDX] != inst_ev ||
+	    cpu_grp->common_ev_ids[CYC_IDX] != cyc_ev ||
+	    cpu_grp->common_ev_ids[STALL_IDX] != stall_ev ||
+	    mons->miss_ev_id != cachemiss_ev)
+		return -EINVAL;
+
+	spin_lock(&cpu_data->pmu_lock);
+	*inst = cpu_data->inst;
+	*cyc = cpu_data->cyc;
+	*stall = cpu_data->stall;
+	*cachemiss = cpu_data->cachemiss;
+	spin_unlock(&cpu_data->pmu_lock);
+
+	return 0;
+}
+EXPORT_SYMBOL(get_ev_data);
+
 static inline void read_event(struct event_data *event)
 {
 	u64 total, enabled, running;
@@ -193,13 +215,16 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 	struct memlat_mon *mon;
 	ktime_t now = ktime_get();
 	unsigned long delta = ktime_us_delta(now, cpu_grp->last_update_ts);
+	struct cpu_data *cpu_data;
+	struct event_data *common_evs;
+	unsigned int mon_idx;
 
 	cpu_grp->last_ts_delta_us = delta;
 	cpu_grp->last_update_ts = now;
 
 	for_each_cpu(cpu, &cpu_grp->cpus) {
-		struct cpu_data *cpu_data = to_cpu_data(cpu_grp, cpu);
-		struct event_data *common_evs = cpu_data->common_evs;
+		cpu_data = to_cpu_data(cpu_grp, cpu);
+		common_evs = cpu_data->common_evs;
 
 		for (i = 0; i < NUM_COMMON_EVS; i++) {
 			cpu_grp->read_event_cpu = cpu;
@@ -227,8 +252,7 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 			continue;
 
 		for_each_cpu(cpu, &mon->cpus) {
-			unsigned int mon_idx =
-				cpu - cpumask_first(&mon->cpus);
+			mon_idx = cpu - cpumask_first(&mon->cpus);
 			cpu_grp->read_event_cpu = cpu;
 			read_event(&mon->miss_ev[mon_idx]);
 			if (mon->wb_ev_id && mon->access_ev_id) {
@@ -238,6 +262,13 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 			cpu_grp->read_event_cpu = -1;
 		}
 	}
+
+	spin_lock(&cpu_data->pmu_lock);
+	cpu_data->inst = common_evs[INST_IDX].last_delta;
+	cpu_data->cyc = common_evs[CYC_IDX].last_delta;
+	cpu_data->stall = common_evs[STALL_IDX].last_delta;
+	cpu_data->cachemiss = mon->miss_ev[mon_idx].last_delta;
+	spin_unlock(&cpu_data->pmu_lock);
 }
 
 static unsigned long get_cnt(struct memlat_hwmon *hw)
@@ -397,6 +428,7 @@ static int memlat_idle_read_events(unsigned int cpu)
 	struct memlat_cpu_grp *cpu_grp = per_cpu(per_cpu_grp, cpu);
 	int i, ret = 0;
 	unsigned int idx;
+	struct cpu_data *cpu_data = to_cpu_data(cpu_grp, cpu);
 	struct event_data *common_evs;
 	unsigned long flags;
 
@@ -426,6 +458,14 @@ static int memlat_idle_read_events(unsigned int cpu)
 			ret = perf_event_read_local(mon->miss_ev[idx].pevent,
 			&mon->miss_ev[idx].cached_total_count, NULL, NULL);
 	}
+
+	spin_lock(&cpu_data->pmu_lock);
+	cpu_data->inst = common_evs[INST_IDX].last_delta;
+	cpu_data->cyc = common_evs[CYC_IDX].last_delta;
+	cpu_data->stall = common_evs[STALL_IDX].last_delta;
+	cpu_data->cachemiss = mon->miss_ev[idx].last_delta;
+	spin_unlock(&cpu_data->pmu_lock);
+
 exit:
 	spin_unlock_irqrestore(&cpu_grp->mon_active_lock, flags);
 	return ret;
@@ -796,7 +836,7 @@ static struct device_node *parse_child_nodes(struct device *dev)
 }
 
 #define DEFAULT_UPDATE_MS 100
-static int memlat_cpu_grp_probe(struct platform_device *pdev)
+static int memlat_per_cpu_grprobe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct memlat_cpu_grp *cpu_grp;
@@ -847,10 +887,11 @@ static int memlat_cpu_grp_probe(struct platform_device *pdev)
 	cpu_grp->common_ev_ids[CYC_IDX] = event_id;
 
 	ret = of_property_read_u32(dev->of_node, "qcom,stall-ev", &event_id);
-	if (ret < 0)
+	if (ret) {
 		dev_dbg(dev, "Stall event not specified. Skipping.\n");
-	else
-		cpu_grp->common_ev_ids[STALL_IDX] = event_id;
+		event_id = STALL_EV;
+	}
+	cpu_grp->common_ev_ids[STALL_IDX] = event_id;
 
 	num_cpus = cpumask_weight(&cpu_grp->cpus);
 	cpu_grp->cpus_data =
@@ -881,6 +922,7 @@ static int memlat_mon_probe(struct platform_device *pdev, bool is_compute)
 	struct memlat_hwmon *hw;
 	unsigned int event_id, num_cpus, cpu;
 	unsigned long flags;
+	struct cpu_data *cpu_data;
 
 	if (!memlat_wq)
 		memlat_wq = create_freezable_workqueue("memlat_wq");
@@ -903,6 +945,12 @@ static int memlat_mon_probe(struct platform_device *pdev, bool is_compute)
 	spin_unlock_irqrestore(&cpu_grp->mon_active_lock, flags);
 	mon->requested_update_ms = 0;
 	mon->cpu_grp = cpu_grp;
+
+	for_each_cpu (cpu, &cpu_grp->cpus) {
+		per_cpu(per_cpu_grp, cpu) = cpu_grp;
+		cpu_data = to_cpu_data(cpu_grp, cpu);
+		spin_lock_init(&cpu_data->pmu_lock);
+	}
 
 	if (get_mask_from_dev_handle(pdev, &mon->cpus)) {
 		cpumask_copy(&mon->cpus, &cpu_grp->cpus);
@@ -1029,7 +1077,7 @@ static int arm_memlat_mon_driver_probe(struct platform_device *pdev)
 
 	switch (type) {
 	case MEMLAT_CPU_GRP:
-		ret = memlat_cpu_grp_probe(pdev);
+		ret = memlat_per_cpu_grprobe(pdev);
 		if (of_get_available_child_count(dev->of_node))
 			of_platform_populate(dev->of_node, NULL, NULL, dev);
 		break;
