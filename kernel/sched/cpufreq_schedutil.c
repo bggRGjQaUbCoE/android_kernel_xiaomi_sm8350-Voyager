@@ -15,6 +15,8 @@
 #include <linux/sched/sysctl.h>
 #include <trace/hooks/sched.h>
 
+#include <linux/hwui_mon.h>
+
 #define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
@@ -434,7 +436,13 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 
 	raw_freq = choose_freq(sg_policy, prev_laf);
 	map_freq = walt_map_util_freq(util, sg_policy, max, sg_cpu->cpu);
-	freq = min(raw_freq, map_freq);
+	
+	if (in_jank == true) {
+	        freq = map_freq;
+	        in_jank = false;
+	} else {
+	        freq = map_freq;
+        }
 
 	trace_sugov_next_freq_tl(policy->cpu, util, max, freq, prev_laf, prev_freq);
 #else /* !CONFIG_OPLUS_FEATURE_SUGOV_TL */
@@ -729,8 +737,8 @@ static inline bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu) { return false; }
 #define DEFAULT_CPU0_RTG_BOOST_FREQ 1000000
 #define DEFAULT_CPU4_RTG_BOOST_FREQ 0
 #define DEFAULT_CPU7_RTG_BOOST_FREQ 0
-#define DEFAULT_TARGET_LOAD_THRESH 1024
-#define DEFAULT_TARGET_LOAD_SHIFT 4
+#define DEFAULT_TARGET_LOAD_THRESH 768
+#define DEFAULT_TARGET_LOAD_SHIFT 1
 static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 			      unsigned long *max)
 {
