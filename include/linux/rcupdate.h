@@ -37,6 +37,7 @@
 /* Exported common interfaces */
 void call_rcu(struct rcu_head *head, rcu_callback_t func);
 void rcu_barrier_tasks(void);
+void rcu_barrier_tasks_rude(void);
 void synchronize_rcu(void);
 
 #ifdef CONFIG_PREEMPT_RCU
@@ -131,25 +132,57 @@ static inline void rcu_nocb_flush_deferred_wakeup(void) { }
  * Note a quasi-voluntary context switch for RCU-tasks's benefit.
  * This is a macro rather than an inline function to avoid #include hell.
  */
-#ifdef CONFIG_TASKS_RCU
-#define rcu_tasks_qs(t) \
-	do { \
-		if (READ_ONCE((t)->rcu_tasks_holdout)) \
-			WRITE_ONCE((t)->rcu_tasks_holdout, false); \
+#ifdef CONFIG_TASKS_RCU_GENERIC
+
+# ifdef CONFIG_TASKS_RCU
+# define rcu_tasks_classic_qs(t, preempt)				\
+	do {								\
+		if (!(preempt) && READ_ONCE((t)->rcu_tasks_holdout))	\
+			WRITE_ONCE((t)->rcu_tasks_holdout, false);	\
 	} while (0)
-#define rcu_note_voluntary_context_switch(t) rcu_tasks_qs(t)
 void call_rcu_tasks(struct rcu_head *head, rcu_callback_t func);
 void synchronize_rcu_tasks(void);
+# else
+# define rcu_tasks_classic_qs(t, preempt) do { } while (0)
+# define call_rcu_tasks call_rcu
+# define synchronize_rcu_tasks synchronize_rcu
+# endif
+
+# ifdef CONFIG_TASKS_RCU_TRACE
+# define rcu_tasks_trace_qs(t)						\
+	do {								\
+		if (!likely(READ_ONCE((t)->trc_reader_checked)) &&	\
+		    !unlikely(READ_ONCE((t)->trc_reader_nesting))) {	\
+			smp_store_release(&(t)->trc_reader_checked, true); \
+			smp_mb(); /* Readers partitioned by store. */	\
+		}							\
+	} while (0)
+# else
+# define rcu_tasks_trace_qs(t) do { } while (0)
+# endif
+
+#define rcu_tasks_qs(t, preempt)					\
+do {									\
+	rcu_tasks_classic_qs((t), (preempt));				\
+	rcu_tasks_trace_qs((t));					\
+} while (0)
+
+# ifdef CONFIG_TASKS_RUDE_RCU
+void call_rcu_tasks_rude(struct rcu_head *head, rcu_callback_t func);
+void synchronize_rcu_tasks_rude(void);
+# endif
+
+#define rcu_note_voluntary_context_switch(t) rcu_tasks_qs(t, false)
 void exit_tasks_rcu_start(void);
 void exit_tasks_rcu_finish(void);
-#else /* #ifdef CONFIG_TASKS_RCU */
-#define rcu_tasks_qs(t)	do { } while (0)
+#else /* #ifdef CONFIG_TASKS_RCU_GENERIC */
+#define rcu_tasks_qs(t, preempt) do { } while (0)
 #define rcu_note_voluntary_context_switch(t) do { } while (0)
 #define call_rcu_tasks call_rcu
 #define synchronize_rcu_tasks synchronize_rcu
 static inline void exit_tasks_rcu_start(void) { }
 static inline void exit_tasks_rcu_finish(void) { }
-#endif /* #else #ifdef CONFIG_TASKS_RCU */
+#endif /* #else #ifdef CONFIG_TASKS_RCU_GENERIC */
 
 /**
  * cond_resched_tasks_rcu_qs - Report potential quiescent states to RCU
@@ -160,7 +193,7 @@ static inline void exit_tasks_rcu_finish(void) { }
  */
 #define cond_resched_tasks_rcu_qs() \
 do { \
-	rcu_tasks_qs(current); \
+	rcu_tasks_qs(current, false); \
 	cond_resched(); \
 } while (0)
 
@@ -383,6 +416,24 @@ do {									      \
 	else								      \
 		smp_store_release(&p, RCU_INITIALIZER((typeof(p))_r_a_p__v)); \
 } while (0)
+
+/**
+ * rcu_replace_pointer() - replace an RCU pointer, returning its old value
+ * @rcu_ptr: RCU pointer, whose old value is returned
+ * @ptr: regular pointer
+ * @c: the lockdep conditions under which the dereference will take place
+ *
+ * Perform a replacement, where @rcu_ptr is an RCU-annotated
+ * pointer and @c is the lockdep argument that is passed to the
+ * rcu_dereference_protected() call used to read that pointer.  The old
+ * value of @rcu_ptr is returned, and @rcu_ptr is set to @ptr.
+ */
+#define rcu_replace_pointer(rcu_ptr, ptr, c)				\
+({									\
+	typeof(ptr) __tmp = rcu_dereference_protected((rcu_ptr), (c));	\
+	rcu_assign_pointer((rcu_ptr), (ptr));				\
+	__tmp;								\
+})
 
 /**
  * rcu_swap_protected() - swap an RCU and a regular pointer
@@ -895,5 +946,9 @@ rcu_head_after_call_rcu(struct rcu_head *rhp, rcu_callback_t f)
 	WARN_ON_ONCE(func != (rcu_callback_t)~0L);
 	return false;
 }
+
+/* kernel/ksysfs.c definitions */
+extern int rcu_expedited;
+extern int rcu_normal;
 
 #endif /* __LINUX_RCUPDATE_H */

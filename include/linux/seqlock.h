@@ -20,8 +20,24 @@
 #include <linux/preempt.h>
 #include <linux/spinlock.h>
 #include <linux/ww_mutex.h>
+#include <linux/kcsan-checks.h>
 
 #include <asm/processor.h>
+
+/*
+ * The seqlock interface does not prescribe a precise sequence of read
+ * begin/retry/end. For readers, typically there is a call to
+ * read_seqcount_begin() and read_seqcount_retry(), however, there are more
+ * esoteric cases which do not follow this pattern.
+ *
+ * As a consequence, we take the following best-effort approach for raw usage
+ * via seqcount_t under KCSAN: upon beginning a seq-reader critical section,
+ * pessimistically mark the next KCSAN_SEQLOCK_REGION_MAX memory accesses as
+ * atomics; if there is a matching read_seqcount_retry() call, no following
+ * memory operations are considered atomic. Usage of seqlocks via seqlock_t
+ * interface is not affected.
+ */
+#define KCSAN_SEQLOCK_REGION_MAX 1000
 
 /*
  * Sequence counters (seqcount_t)
@@ -46,6 +62,13 @@
  * lock (seqlock_t) instead.
  *
  * See Documentation/locking/seqlock.rst
+ */
+
+/*
+ * Version using sequence counter only.
+ * This can be used when code has its own mutex protecting the
+ * updating starting before the write_seqcountbeqin() and ending
+ * after the write_seqcount_end().
  */
 typedef struct seqcount {
 	unsigned sequence;
@@ -312,6 +335,7 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
 	while ((seq = __seqcount_sequence(s)) & 1)			\
 		cpu_relax();						\
 									\
+	kcsan_atomic_next(KCSAN_SEQLOCK_REGION_MAX);			\
 	seq;								\
 })
 
@@ -357,6 +381,7 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
 	unsigned seq = __seqcount_sequence(s);				\
 									\
 	smp_rmb();							\
+	kcsan_atomic_next(KCSAN_SEQLOCK_REGION_MAX);			\
 	seq;								\
 })
 
@@ -406,7 +431,8 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
 
 static inline int __read_seqcount_t_retry(const seqcount_t *s, unsigned start)
 {
-	return unlikely(s->sequence != start);
+	kcsan_atomic_next(0);
+	return unlikely(READ_ONCE(s->sequence) != start);
 }
 
 /**
@@ -443,6 +469,7 @@ do {									\
 
 static inline void raw_write_seqcount_t_begin(seqcount_t *s)
 {
+	kcsan_nestable_atomic_begin();
 	s->sequence++;
 	smp_wmb();
 }
@@ -463,6 +490,7 @@ static inline void raw_write_seqcount_t_end(seqcount_t *s)
 {
 	smp_wmb();
 	s->sequence++;
+	kcsan_nestable_atomic_end();
 }
 
 /**
@@ -543,7 +571,7 @@ static inline void write_seqcount_t_end(seqcount_t *s)
  * consistency guarantee. It is one wmb cheaper, because it can collapse
  * the two back-to-back wmb()s.
  *
- * Note that, writes surrounding the barrier should be declared atomic (e.g.
+ * Note that writes surrounding the barrier should be declared atomic (e.g.
  * via WRITE_ONCE): a) to ensure the writes become visible to other threads
  * atomically, avoiding compiler optimizations; b) to document which writes are
  * meant to propagate to the reader critical section. This is necessary because
@@ -581,9 +609,11 @@ static inline void write_seqcount_t_end(seqcount_t *s)
 
 static inline void raw_write_seqcount_t_barrier(seqcount_t *s)
 {
+	kcsan_nestable_atomic_begin();
 	s->sequence++;
 	smp_wmb();
 	s->sequence++;
+	kcsan_nestable_atomic_end();
 }
 
 /**
@@ -805,7 +835,11 @@ typedef struct {
  */
 static inline unsigned read_seqbegin(const seqlock_t *sl)
 {
-	return read_seqcount_begin(&sl->seqcount);
+	unsigned ret = read_seqcount_begin(&sl->seqcount);
+
+	kcsan_atomic_next(0);  /* non-raw usage, assume closing read_seqretry() */
+	kcsan_flat_atomic_begin();
+	return ret;
 }
 
 /**
@@ -821,6 +855,12 @@ static inline unsigned read_seqbegin(const seqlock_t *sl)
  */
 static inline unsigned read_seqretry(const seqlock_t *sl, unsigned start)
 {
+	/*
+	 * Assume not nested: read_seqretry() may be called multiple times when
+	 * completing read critical section.
+	 */
+	kcsan_flat_atomic_end();
+
 	return read_seqcount_retry(&sl->seqcount, start);
 }
 
