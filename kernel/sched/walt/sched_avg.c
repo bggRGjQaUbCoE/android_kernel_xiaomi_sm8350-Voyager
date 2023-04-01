@@ -235,13 +235,13 @@ unsigned int sched_get_cpu_util(int cpu)
 	unsigned long capacity, flags;
 	unsigned int busy;
 
-	raw_spin_lock_irqsave(&rq->lock, flags);
+	raw_spin_rq_lock_irqsave(rq, flags);
 
 	capacity = capacity_orig_of(cpu);
 
 	util = rq->wrq.prev_runnable_sum + rq->wrq.grp_time.prev_runnable_sum;
 	util = div64_u64(util, sched_ravg_window >> SCHED_CAPACITY_SHIFT);
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
+	raw_spin_rq_unlock_irqrestore(rq, flags);
 
 	util = (util >= capacity) ? capacity : util;
 	busy = div64_ul((util * 100), capacity);

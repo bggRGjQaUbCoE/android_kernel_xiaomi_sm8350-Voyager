@@ -10694,7 +10694,7 @@ no_move:
 			 */
 			if (is_reserved(this_cpu) ||
 					is_reserved(cpu_of(busiest))) {
-				raw_spin_unlock_irqrestore(&busiest->lock,
+				raw_spin_rq_unlock_irqrestore(busiest,
 								flags);
 				*continue_balancing = 0;
 				goto out;
@@ -11684,7 +11684,7 @@ static void nohz_newidle_balance(struct rq *this_rq)
 	    time_before(jiffies, READ_ONCE(nohz.next_blocked)))
 		return;
 
-	raw_spin_unlock(&this_rq->lock);
+	raw_spin_rq_unlock(this_rq);
 	/*
 	 * This CPU is going to be idle and blocked load of idle CPUs
 	 * need to be updated. Run the ilb locally as it is a good
@@ -11693,7 +11693,7 @@ static void nohz_newidle_balance(struct rq *this_rq)
 	 */
 	if (!_nohz_idle_balance(this_rq, NOHZ_STATS_KICK, CPU_NEWLY_IDLE))
 		kick_ilb(NOHZ_STATS_KICK);
-	raw_spin_lock(&this_rq->lock);
+	raw_spin_rq_lock(this_rq);
 }
 
 #else /* !CONFIG_NO_HZ_COMMON */

@@ -3152,12 +3152,12 @@ unlock:
 out:
 #ifdef CONFIG_SCHED_WALT
 	if (success && sched_predl) {
-		raw_spin_lock_irqsave(&cpu_rq(cpu)->lock, flags);
+		raw_spin_rq_lock_irqsave(cpu_rq(cpu), flags);
 		if (do_pl_notif(cpu_rq(cpu)))
 			cpufreq_update_util(cpu_rq(cpu),
 						SCHED_CPUFREQ_WALT |
 						SCHED_CPUFREQ_PL);
-		raw_spin_unlock_irqrestore(&cpu_rq(cpu)->lock, flags);
+		raw_spin_rq_unlock_irqrestore(cpu_rq(cpu), flags);
 	}
 #endif
 
@@ -7366,9 +7366,9 @@ static void sched_rq_cpu_starting(unsigned int cpu)
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&rq->lock, flags);
+	raw_spin_rq_lock_irqsave(rq, flags);
 	set_window_start(rq);
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
+	raw_spin_rq_unlock_irqrestore(rq, flags);
 
 	rq->calc_load_update = calc_load_update;
 	update_max_interval();

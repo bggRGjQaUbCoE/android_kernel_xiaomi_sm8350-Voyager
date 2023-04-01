@@ -90,9 +90,9 @@ static void acquire_rq_locks_irqsave(const cpumask_t *cpus,
 	local_irq_save(*flags);
 	for_each_cpu(cpu, cpus) {
 		if (level == 0)
-			raw_spin_lock(&cpu_rq(cpu)->lock);
+			raw_spin_rq_lock(cpu_rq(cpu));
 		else
-			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
+			raw_spin_rq_lock_nested(cpu_rq(cpu), level);
 		level++;
 	}
 }
@@ -103,7 +103,7 @@ static void release_rq_locks_irqrestore(const cpumask_t *cpus,
 	int cpu;
 
 	for_each_cpu(cpu, cpus)
-		raw_spin_unlock(&cpu_rq(cpu)->lock);
+		raw_spin_rq_unlock(cpu_rq(cpu));
 	local_irq_restore(*flags);
 }
 
@@ -468,9 +468,9 @@ void walt_sched_account_irqstart(int cpu, struct task_struct *curr)
 		return;
 
 	/* We're here without rq->lock held, IRQ disabled */
-	raw_spin_lock(&rq->lock);
+	raw_spin_rq_lock(rq);
 	update_task_cpu_cycles(curr, cpu, sched_ktime_clock());
-	raw_spin_unlock(&rq->lock);
+	raw_spin_rq_unlock(rq);
 }
 
 void walt_sched_account_irqend(int cpu, struct task_struct *curr, u64 delta)
@@ -478,9 +478,9 @@ void walt_sched_account_irqend(int cpu, struct task_struct *curr, u64 delta)
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&rq->lock, flags);
+	raw_spin_rq_lock_irqsave(rq, flags);
 	walt_update_task_ravg(curr, rq, IRQ_UPDATE, sched_ktime_clock(), delta);
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
+	raw_spin_rq_unlock_irqrestore(rq, flags);
 }
 
 /*
@@ -502,14 +502,14 @@ void clear_walt_request(int cpu)
 	if (rq->wrq.push_task) {
 		struct task_struct *push_task = NULL;
 
-		raw_spin_lock_irqsave(&rq->lock, flags);
+		raw_spin_rq_lock_irqsave(rq, flags);
 		if (rq->wrq.push_task) {
 			push_task = rq->wrq.push_task;
 			rq->wrq.push_task = NULL;
 		}
 		clear_reserved(rq->push_cpu);
 		rq->active_balance = 0;
-		raw_spin_unlock_irqrestore(&rq->lock, flags);
+		raw_spin_rq_unlock_irqrestore(rq, flags);
 		if (push_task)
 			put_task_struct(push_task);
 	}
@@ -1093,12 +1093,12 @@ void set_window_start(struct rq *rq)
 	} else {
 		struct rq *sync_rq = cpu_rq(cpumask_any(cpu_online_mask));
 
-		raw_spin_unlock(&rq->lock);
+		raw_spin_rq_unlock(rq);
 		double_rq_lock(rq, sync_rq);
 		rq->wrq.window_start = sync_rq->wrq.window_start;
 		rq->wrq.curr_runnable_sum = rq->wrq.prev_runnable_sum = 0;
 		rq->wrq.nt_curr_runnable_sum = rq->wrq.nt_prev_runnable_sum = 0;
-		raw_spin_unlock(&sync_rq->lock);
+		raw_spin_rq_unlock(sync_rq);
 	}
 
 	rq->curr->wts.mark_start = rq->wrq.window_start;
@@ -2087,7 +2087,7 @@ update_task_rq_cpu_cycles(struct task_struct *p, struct rq *rq, int event,
 	u64 time_delta;
 	int cpu = cpu_of(rq);
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_rq_held(rq);
 
 	if (!use_cycle_counter) {
 		rq->wrq.task_exec_scale = DIV64_U64_ROUNDUP(cpu_cur_freq(cpu) *
@@ -2164,7 +2164,7 @@ void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int event,
 	if (!rq->wrq.window_start || p->wts.mark_start == wallclock)
 		return;
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_rq_held(rq);
 
 	old_window_start = update_window_start(rq, wallclock, event);
 
@@ -2689,10 +2689,10 @@ static int cpufreq_notifier_trans(struct notifier_block *nb,
 		for_each_cpu(j, &cluster->cpus) {
 			struct rq *rq = cpu_rq(j);
 
-			raw_spin_lock_irqsave(&rq->lock, flags);
+			raw_spin_rq_lock_irqsave(rq, flags);
 			walt_update_task_ravg(rq->curr, rq, TASK_UPDATE,
 					 sched_ktime_clock(), 0);
-			raw_spin_unlock_irqrestore(&rq->lock, flags);
+			raw_spin_rq_unlock_irqrestore(rq, flags);
 		}
 
 		cluster->cur_freq = new_freq;
@@ -3472,9 +3472,9 @@ void walt_irq_work(struct irq_work *irq_work)
 
 	for_each_cpu(cpu, cpu_possible_mask) {
 		if (level == 0)
-			raw_spin_lock(&cpu_rq(cpu)->lock);
+			raw_spin_rq_lock(cpu_rq(cpu));
 		else
-			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
+			raw_spin_rq_lock_nested(cpu_rq(cpu), level);
 		level++;
 	}
 
@@ -3593,7 +3593,7 @@ void walt_irq_work(struct irq_work *irq_work)
 	}
 
 	for_each_cpu(cpu, cpu_possible_mask)
-		raw_spin_unlock(&cpu_rq(cpu)->lock);
+		raw_spin_rq_unlock(cpu_rq(cpu));
 
 	if (!is_migration)
 		core_ctl_check(this_rq()->wrq.window_start);
@@ -3698,9 +3698,9 @@ int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
 	 * updating the thresholds is sufficient for
 	 * an atomic update.
 	 */
-	raw_spin_lock_irqsave(&rq->lock, flags);
+	raw_spin_rq_lock_irqsave(rq, flags);
 	walt_update_group_thresholds();
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
+	raw_spin_rq_unlock_irqrestore(rq, flags);
 
 	mutex_unlock(&mutex);
 

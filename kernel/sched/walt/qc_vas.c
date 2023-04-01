@@ -280,7 +280,7 @@ kick_active_balance(struct rq *rq, struct task_struct *p, int new_cpu)
 	int rc = 0;
 
 	/* Invoke active balance to force migrate currently running task */
-	raw_spin_lock_irqsave(&rq->lock, flags);
+	raw_spin_rq_lock_irqsave(rq, flags);
 	if (!rq->active_balance) {
 		rq->active_balance = 1;
 		rq->push_cpu = new_cpu;
@@ -288,7 +288,7 @@ kick_active_balance(struct rq *rq, struct task_struct *p, int new_cpu)
 		rq->wrq.push_task = p;
 		rc = 1;
 	}
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
+	raw_spin_rq_unlock_irqrestore(rq, flags);
 
 	return rc;
 }
@@ -992,7 +992,7 @@ void
 detach_one_task_core(struct task_struct *p, struct rq *rq,
 						struct list_head *tasks)
 {
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_rq_held(rq);
 
 	p->on_rq = TASK_ON_RQ_MIGRATING;
 	deactivate_task(rq, p, 0);
@@ -1003,7 +1003,7 @@ void attach_tasks_core(struct list_head *tasks, struct rq *rq)
 {
 	struct task_struct *p;
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_rq_held(rq);
 
 	while (!list_empty(tasks)) {
 		p = list_first_entry(tasks, struct task_struct, se.group_node);
