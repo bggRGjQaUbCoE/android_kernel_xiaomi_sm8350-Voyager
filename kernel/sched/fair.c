@@ -3207,9 +3207,6 @@ static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
 	if (cfs_rq->avg.util_sum)
 		return false;
 
-	if (cfs_rq->avg.runnable_sum)
-		return false;
-
 	if (child_cfs_rq_on_list(cfs_rq))
 		return false;
 
@@ -3219,8 +3216,7 @@ static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
 	 * break this.
 	 */
 	SCHED_WARN_ON(cfs_rq->avg.load_avg ||
-		      cfs_rq->avg.util_avg ||
-		      cfs_rq->avg.runnable_avg);
+		      cfs_rq->avg.util_avg);
 
 	return true;
 }
@@ -6502,7 +6498,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 	}
 
 	for_each_cpu_wrap(cpu, cpus, target + 1) {
-		if (smt) {
+		if (has_idle_core) {
 			i = select_idle_core(p, cpu, cpus, &idle_cpu);
 			if ((unsigned int)i < nr_cpumask_bits)
 				return i;
@@ -10530,7 +10526,7 @@ static int should_we_balance(struct lb_env *env)
 	 * to optimize wakeup latency.
 	 */
 	if (env->idle == CPU_NEWLY_IDLE) {
-		if (env->dst_rq->nr_running > 0 || env->dst_rq->ttwu_pending)
+		if (env->dst_rq->nr_running > 0)
 			return 0;
 		return 1;
 	}
@@ -11832,13 +11828,6 @@ int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	update_misfit_status(NULL, this_rq);
 
 	/*
-	 * There is a task waiting to run. No need to search for one.
-	 * Return 0; the task will be enqueued when switching to idle.
-	 */
-	if (this_rq->ttwu_pending)
-		return 0;
-
-	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
 	 * measure the duration of idle_balance() as idle time.
 	 */
@@ -11917,8 +11906,7 @@ int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		 * Stop searching for tasks to pull if there are now runnable
 		 * tasks on this rq or if active migration kicked in.
 		 */
-		if (pulled_task || this_rq->nr_running > 0 ||
-		    this_rq->ttwu_pending)
+		if (pulled_task || this_rq->nr_running > 0)
 			break;
 	}
 	rcu_read_unlock();

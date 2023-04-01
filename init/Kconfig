@@ -477,7 +477,6 @@ config HAVE_SCHED_AVG_IRQ
 	depends on IRQ_TIME_ACCOUNTING || PARAVIRT_TIME_ACCOUNTING
 	depends on SMP
 
-<<<<<<< HEAD
 config SCHED_WALT
 	bool "Support window based load tracking"
 	depends on SMP
@@ -498,11 +497,10 @@ config MIHW
 	default y
 	help
 	  Mi driver code
-=======
+
 config SCHED_THERMAL_PRESSURE
 	bool "Enable periodic averaging of thermal pressure"
 	depends on SMP
->>>>>>> 765047932f15 (sched/pelt: Add support to track thermal pressure)
 
 config BSD_PROCESS_ACCT
 	bool "BSD Process Accounting"
