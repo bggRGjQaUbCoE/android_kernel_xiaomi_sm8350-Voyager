@@ -1477,11 +1477,6 @@ void invalidate_bh_lrus(void)
 }
 EXPORT_SYMBOL_GPL(invalidate_bh_lrus);
 
-static void evict_bh_lrus(struct buffer_head *bh)
-{
-	on_each_cpu_cond(bh_exists_in_lru, __evict_bh_lru, bh, 1, GFP_ATOMIC);
-}
-
 void set_bh_page(struct buffer_head *bh,
 		struct page *page, unsigned long offset)
 {
@@ -3292,15 +3287,8 @@ drop_buffers(struct page *page, struct buffer_head **buffers_to_free)
 
 	bh = head;
 	do {
-		if (buffer_busy(bh)) {
-			/*
-			 * Check if the busy failure was due to an
-			 * outstanding LRU reference
-			 */
-			evict_bh_lrus(bh);
-			if (buffer_busy(bh))
-				goto failed;
-		}
+		if (buffer_busy(bh))
+			goto failed;
 		bh = bh->b_this_page;
 	} while (bh != head);
 
