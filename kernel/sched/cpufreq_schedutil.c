@@ -390,7 +390,7 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 				policy->cpuinfo.max_freq : policy->cur;
 	unsigned long next_freq = 0;
 	unsigned int raw_freq, final_freq, map_freq;
-
+	unsigned int freq_temp, index_temp;
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
 	unsigned int prev_freq = freq;
 	unsigned int prev_laf = prev_freq * util * 100 / max;
@@ -424,6 +424,12 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	sg_policy->need_freq_update = false;
 
 	final_freq = cpufreq_driver_resolve_freq(policy, freq);
+
+	index_temp = cpufreq_frequency_table_target(policy, final_freq - 1, CPUFREQ_RELATION_H);
+
+        freq_temp = policy->freq_table[index_temp +2].frequency;
+	if (policy->cpuinfo.max_freq >= freq_temp && freq_temp > 0)
+	                policy->max = freq_temp;
 
 	if (!sugov_update_next_freq(sg_policy, time, final_freq, freq))
 		return 0;
@@ -543,7 +549,9 @@ static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
 	unsigned long max = arch_scale_cpu_capacity(sg_cpu->cpu);
 	unsigned long util;
 
+#if 0
 	sg_cpu->max = max;
+#endif
 	sg_cpu->bw_dl = cpu_bw_dl(rq);
 
 #ifdef CONFIG_SCHED_WALT
@@ -1710,6 +1718,7 @@ static int sugov_start(struct cpufreq_policy *policy)
 		memset(sg_cpu, 0, sizeof(*sg_cpu));
 		sg_cpu->cpu			= cpu;
 		sg_cpu->sg_policy		= sg_policy;
+	        sg_cpu->max                     = arch_scale_cpu_capacity(sg_cpu->cpu);
 	}
 
 #ifdef CONFIG_OPLUS_UAG_AMU_AWARE
