@@ -9,7 +9,7 @@
 #include <linux/module.h>
 
 bool in_jank = false;
-static void handler(unsigned int ui_frame_time)
+static void handler(unsigned int ui_frame_time, ktime_t cur_time)
 {
 	pr_info("Detect jank in %s with frametime = %d",
 	        current->comm, ui_frame_time);
