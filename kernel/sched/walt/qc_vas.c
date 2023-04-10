@@ -138,6 +138,10 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	unsigned long scale_cpu;
 	int cpu;
 	struct rq *rq;
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	unsigned int tl = 80;
+	struct cpufreq_policy *policy;
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
 	if (!sum_util)
 		return 0;
@@ -150,7 +154,18 @@ static inline unsigned long walt_em_cpu_energy(struct em_perf_domain *pd,
 	cpu = cpumask_first(to_cpumask(pd->cpus));
 	scale_cpu = arch_scale_cpu_capacity(cpu);
 
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+	policy = cpufreq_cpu_get(cpu);
+
+	if (policy) {
+		tl = get_targetload(policy);
+		cpufreq_cpu_put(policy);
+	}
+
+	max_util = max_util * 100 / tl;
+#else /* !CONFIG_OPLUS_FEATURE_SUGOV_TL */
 	max_util = max_util + (max_util >> 2); /* account  for TARGET_LOAD usually 80 */
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 	max_util = max(max_util,
 			(arch_scale_freq_capacity(cpu) * scale_cpu) >>
 			SCHED_CAPACITY_SHIFT);

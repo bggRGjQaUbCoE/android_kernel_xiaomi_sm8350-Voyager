@@ -33,6 +33,9 @@ struct compute_energy_output {
 	unsigned long	cost[MAX_CLUSTERS];
 	unsigned int	cluster_first_cpu[MAX_CLUSTERS];
 };
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+extern unsigned int get_targetload(struct cpufreq_policy *policy);
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
 extern long
 walt_compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd,
