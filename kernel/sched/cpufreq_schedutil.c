@@ -17,6 +17,12 @@
 
 #include <linux/hwui_mon.h>
 
+#include "cpufreq_schedutil.h"
+
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+#include "stall_util_cal.h"
+#endif
+
 #define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
@@ -30,79 +36,6 @@ static int init_flag[MAX_CLUSTERS];
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY
 #include <linux/cpufreq_effiency.h>
 #endif
-
-struct sugov_tunables {
-	struct gov_attr_set	attr_set;
-	unsigned int		up_rate_limit_us;
-	unsigned int		down_rate_limit_us;
-	unsigned int		hispeed_load;
-	unsigned int		hispeed_freq;
-	unsigned int		rtg_boost_freq;
-	unsigned int		target_load_thresh;
-	unsigned int		target_load_shift;
-	bool			pl;
-#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
-	spinlock_t		target_loads_lock;
-	unsigned int		*target_loads;
-	int			ntarget_loads;
-#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
-};
-
-struct sugov_policy {
-	struct cpufreq_policy	*policy;
-
-	u64 last_ws;
-	u64 curr_cycles;
-	u64 last_cyc_update_time;
-	unsigned long avg_cap;
-	struct sugov_tunables	*tunables;
-	struct list_head	tunables_hook;
-	unsigned long hispeed_util;
-	unsigned long rtg_boost_util;
-	unsigned long max;
-
-	raw_spinlock_t		update_lock;	/* For shared policies */
-	u64			last_freq_update_time;
-	s64			min_rate_limit_ns;
-	s64			up_rate_delay_ns;
-	s64			down_rate_delay_ns;
-	unsigned int		next_freq;
-	unsigned int		cached_raw_freq;
-
-	/* The next fields are only needed if fast switch cannot be used: */
-	struct			irq_work irq_work;
-	struct			kthread_work work;
-	struct			mutex work_lock;
-	struct			kthread_worker worker;
-	struct task_struct	*thread;
-	bool			work_in_progress;
-
-	bool			limits_changed;
-	bool			need_freq_update;
-};
-
-struct sugov_cpu {
-	struct update_util_data	update_util;
-	struct sugov_policy	*sg_policy;
-	unsigned int		cpu;
-
-	bool			iowait_boost_pending;
-	unsigned int		iowait_boost;
-	u64			last_update;
-
-	struct walt_cpu_load	walt_load;
-
-	unsigned long util;
-	unsigned int flags;
-
-	unsigned long		bw_dl;
-	unsigned long		max;
-
-	/* The field below is for single-CPU policies only: */
-#ifdef CONFIG_NO_HZ_COMMON
-	unsigned long		saved_idle_calls;
-#endif
-};
 
 static DEFINE_PER_CPU(struct sugov_cpu, sugov_cpu);
 static unsigned int stale_ns;
@@ -616,6 +549,10 @@ static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
 #ifdef CONFIG_SCHED_WALT
 	util = cpu_util_freq_walt(sg_cpu->cpu, &sg_cpu->walt_load);
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_adjust_util(sg_cpu->cpu, &util, sg_cpu->sg_policy);
+#endif
+
 	return uclamp_rq_util_with(rq, util, NULL);
 #else
 	util = cpu_util_cfs(rq);
@@ -852,6 +789,9 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	busy = use_pelt() && !sg_policy->need_freq_update &&
 		sugov_cpu_is_busy(sg_cpu);
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_update_counter(sg_policy);
+#endif
 	sg_cpu->util = util = sugov_get_util(sg_cpu);
 	max = sg_cpu->max;
 	sg_cpu->flags = flags;
@@ -992,6 +932,9 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 
 	if (sugov_should_update_freq(sg_policy, time) &&
 	    !(flags & SCHED_CPUFREQ_CONTINUE)) {
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+		uag_update_counter(sg_policy);
+#endif
 		next_f = sugov_next_freq_shared(sg_cpu, time);
 
 		if (sg_policy->policy->fast_switch_enabled)
@@ -1302,6 +1245,68 @@ static ssize_t target_loads_store(struct gov_attr_set *attr_set, const char *buf
 }
 #endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+static ssize_t stall_aware_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%d\n", tunables->stall_aware);
+}
+
+static ssize_t
+stall_aware_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int stall_aware;
+
+	if (kstrtouint(buf, 10, &stall_aware))
+		return -EINVAL;
+
+	tunables->stall_aware = stall_aware;
+	return count;
+}
+
+static ssize_t stall_reduce_pct_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%llu\n", tunables->stall_reduce_pct);
+}
+
+static ssize_t
+stall_reduce_pct_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	int stall_reduce_pct;
+
+	if (kstrtouint(buf, 10, &stall_reduce_pct))
+		return -EINVAL;
+
+	tunables->stall_reduce_pct = stall_reduce_pct;
+	return count;
+}
+
+static ssize_t report_policy_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%d\n", tunables->report_policy);
+}
+
+static ssize_t
+report_policy_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	int report_policy;
+
+	if (kstrtoint(buf, 10, &report_policy))
+		return -EINVAL;
+
+	tunables->report_policy = report_policy;
+	return count;
+}
+#endif /* CONFIG_OPLUS_UAG_AMU_AWARE */
+
 #define WALTGOV_ATTR_RW(_name)						\
 static struct governor_attr _name =					\
 __ATTR(_name, 0644, show_##_name, store_##_name)			\
@@ -1340,6 +1345,11 @@ static struct governor_attr pl = __ATTR_RW(pl);
 static struct governor_attr target_loads =
 	__ATTR(target_loads, 0664, target_loads_show, target_loads_store);
 #endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+static struct governor_attr stall_aware = __ATTR_RW(stall_aware);
+static struct governor_attr stall_reduce_pct = __ATTR_RW(stall_reduce_pct);
+static struct governor_attr report_policy = __ATTR_RW(report_policy);
+#endif
 
 WALTGOV_ATTR_RW(target_load_thresh);
 WALTGOV_ATTR_RW(target_load_shift);
@@ -1354,6 +1364,11 @@ static struct attribute *sugov_attrs[] = {
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
 	&target_loads.attr,
 #endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	&stall_aware.attr,
+	&stall_reduce_pct.attr,
+	&report_policy.attr,
+#endif
 	&target_load_thresh.attr,
 	&target_load_shift.attr,
 	NULL
@@ -1564,6 +1579,12 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	/* init stall cal */
+	tunables->stall_aware = 1;
+	tunables->stall_reduce_pct = 70;
+	tunables->report_policy = REPORT_REDUCE_STALL;
+#endif
 	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
@@ -1691,6 +1712,10 @@ static int sugov_start(struct cpufreq_policy *policy)
 		sg_cpu->sg_policy		= sg_policy;
 	}
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_register_stall_update();
+#endif
+
 	for_each_cpu(cpu, policy->cpus) {
 		struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
 
@@ -1710,6 +1735,9 @@ static void sugov_stop(struct cpufreq_policy *policy)
 	for_each_cpu(cpu, policy->cpus)
 		cpufreq_remove_update_util_hook(cpu);
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_unregister_stall_update();
+#endif
 	synchronize_rcu();
 
 	if (!policy->fast_switch_enabled) {

@@ -175,7 +175,9 @@ static bool was_mask_freq(struct cpufreq_policy *policy, unsigned int freq)
 static unsigned int select_effiency_freq(struct cpufreq_policy *policy, unsigned int freq, unsigned int loadadj_freq)
 {
 	unsigned int freq_temp, index_temp, affect_thres;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 	unsigned int freq_max;
+#endif
 	int cluster_id;
 
 	index_temp = cpufreq_frequency_table_target(policy, freq - 1, CPUFREQ_RELATION_H);
@@ -199,33 +201,45 @@ static unsigned int select_effiency_freq(struct cpufreq_policy *policy, unsigned
 		case GOLDEN_CLUSTER:
 			if ((cluster1_effiency[AFFECT_FREQ_VALUE2] > 0) && (freq >= cluster1_effiency[AFFECT_FREQ_VALUE2])) {
 				affect_thres = cluster1_effiency[AFFECT_THRES_SIZE2];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else if ((cluster1_effiency[AFFECT_FREQ_VALUE1] > 0) && (freq >= cluster1_effiency[AFFECT_FREQ_VALUE1])) {
 				affect_thres = cluster1_effiency[AFFECT_THRES_SIZE1];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else {
 				affect_thres = 0;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				policy->max = policy->cpuinfo.max_freq;
+#endif
 			}
 		break;
 		case GOPLUS_CLUSTER:
 			if ((cluster2_effiency[AFFECT_FREQ_VALUE2] > 0) && (freq >= cluster2_effiency[AFFECT_FREQ_VALUE2])) {
 				affect_thres = cluster2_effiency[AFFECT_THRES_SIZE2];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else if ((cluster2_effiency[AFFECT_FREQ_VALUE1] > 0) && (freq >= cluster2_effiency[AFFECT_FREQ_VALUE1])) {
 				affect_thres = cluster2_effiency[AFFECT_THRES_SIZE1];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +5].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else {
 				affect_thres = 0;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				policy->max = policy->cpuinfo.max_freq;
+#endif
 			}
 		break;
 		default:
