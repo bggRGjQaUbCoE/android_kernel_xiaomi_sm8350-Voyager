@@ -1,4 +1,10 @@
 #include <linux/cpufreq_effiency.h>
+#include <linux/thermal.h>
+
+const char *name = "cpu-0-0-step";
+
+static int max_temp = 75;
+module_param(max_temp, int, 0664);
 
 /* debug_mode, @1: enable debug log output, @0: disable debug log output. */
 static int debug_mode = 0;
@@ -25,6 +31,32 @@ static unsigned int platform_soc_id = 0;
 
 /* declare a spinlock which been inited in init function. */
 raw_spinlock_t power_effiency_lock;
+
+unsigned int thermal_freq(struct cpufreq_policy *policy)
+{
+	struct thermal_zone_device *thermal_dev;
+	int temperature;
+	unsigned int target_freq, index_temp;
+	unsigned int info_freq = policy->cpuinfo.max_freq;
+
+	index_temp = cpufreq_frequency_table_target(policy, info_freq - 1, CPUFREQ_RELATION_H);
+	target_freq = policy->freq_table[index_temp - 3].frequency;
+
+	thermal_dev = thermal_zone_get_zone_by_name(name);
+
+        if (!IS_ERR(thermal_dev))
+		return 0;
+
+        thermal_zone_get_temp(thermal_dev, &temperature);
+        
+	if (!temperature)
+		return 0;
+	
+	if (temperature > max_temp)
+	        return target_freq;
+	
+	return 0;
+}
 
 static int get_cluster_num(struct cpufreq_policy *policy)
 {
@@ -175,7 +207,9 @@ static bool was_mask_freq(struct cpufreq_policy *policy, unsigned int freq)
 static unsigned int select_effiency_freq(struct cpufreq_policy *policy, unsigned int freq, unsigned int loadadj_freq)
 {
 	unsigned int freq_temp, index_temp, affect_thres;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 	unsigned int freq_max;
+#endif
 	int cluster_id;
 
 	index_temp = cpufreq_frequency_table_target(policy, freq - 1, CPUFREQ_RELATION_H);
@@ -190,48 +224,80 @@ static unsigned int select_effiency_freq(struct cpufreq_policy *policy, unsigned
 		case SLIVER_CLUSTER:
 			if ((cluster0_effiency[AFFECT_FREQ_VALUE2] > 0) && (freq >= cluster0_effiency[AFFECT_FREQ_VALUE2])) {
 				affect_thres = cluster0_effiency[AFFECT_THRES_SIZE2];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
+				freq_max = policy->freq_table[index_temp +4].frequency;
+				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
+				    policy->max = freq_max;
+#endif
 			} else if ((cluster0_effiency[AFFECT_FREQ_VALUE1] > 0) && (freq >= cluster0_effiency[AFFECT_FREQ_VALUE1])) {
 				affect_thres = cluster0_effiency[AFFECT_THRES_SIZE1];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
+				freq_max = policy->freq_table[index_temp +4].frequency;
+				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
+				    policy->max = freq_max;
+#endif
 			} else {
 				affect_thres = 0;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
+				policy->max = policy->cpuinfo.max_freq;
+#endif
 			}
 		break;
 		case GOLDEN_CLUSTER:
 			if ((cluster1_effiency[AFFECT_FREQ_VALUE2] > 0) && (freq >= cluster1_effiency[AFFECT_FREQ_VALUE2])) {
 				affect_thres = cluster1_effiency[AFFECT_THRES_SIZE2];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else if ((cluster1_effiency[AFFECT_FREQ_VALUE1] > 0) && (freq >= cluster1_effiency[AFFECT_FREQ_VALUE1])) {
 				affect_thres = cluster1_effiency[AFFECT_THRES_SIZE1];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else {
 				affect_thres = 0;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				policy->max = policy->cpuinfo.max_freq;
+#endif
 			}
 		break;
 		case GOPLUS_CLUSTER:
 			if ((cluster2_effiency[AFFECT_FREQ_VALUE2] > 0) && (freq >= cluster2_effiency[AFFECT_FREQ_VALUE2])) {
 				affect_thres = cluster2_effiency[AFFECT_THRES_SIZE2];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +4].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else if ((cluster2_effiency[AFFECT_FREQ_VALUE1] > 0) && (freq >= cluster2_effiency[AFFECT_FREQ_VALUE1])) {
 				affect_thres = cluster2_effiency[AFFECT_THRES_SIZE1];
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				freq_max = policy->freq_table[index_temp +5].frequency;
 				if (policy->cpuinfo.max_freq >= freq_max && freq_max > 0)
 				    policy->max = freq_max;
+#endif
 			} else {
 				affect_thres = 0;
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
 				policy->max = policy->cpuinfo.max_freq;
+#endif
 			}
 		break;
 		default:
 			affect_thres = 0;
 		break;
 	}
+
+#ifdef CONFIG_CPU_EFF_EXTEND_MODE
+        if(thermal_freq(policy) > 0) {
+                if(policy->max > thermal_freq(policy))
+                        policy->max = thermal_freq(policy);
+        }
+#endif
 
 	if(abs(loadadj_freq - freq_temp) < affect_thres) {
 		if (debug_mode) {

@@ -10,3 +10,10 @@ config OPLUS_FEATURE_SUGOV_POWER_EFFIENCY
 	default y
 	help
 	     Select Left or right frequence point as target frequence base on powerdomain and currenct frequence value
+	     
+config CPU_EFF_EXTEND_MODE
+	tristate "power domain effiency extend"
+	default y
+	help
+	     extended limitation
+
