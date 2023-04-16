@@ -457,23 +457,20 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 				policy->cpuinfo.max_freq : policy->cur;
 	unsigned long next_freq = 0;
 	unsigned int raw_freq, final_freq, map_freq;
-
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
-	unsigned int prev_freq = freq;
+	unsigned int prev_freq = policy->cpuinfo.max_freq;
 	unsigned int prev_laf = prev_freq * util * 100 / max;
 
 	raw_freq = choose_freq(sg_policy, prev_laf);
+
 	map_freq = walt_map_util_freq(util, sg_policy, max, sg_cpu->cpu);
-	
-	if (in_jank == true) {
-	        freq = map_freq;
-	        in_jank = false;
-	} else {
-	        freq = map_freq;
-        }
+
+        freq = raw_freq;
 
 	trace_sugov_next_freq_tl(policy->cpu, util, max, freq, prev_laf, prev_freq);
-#else /* !CONFIG_OPLUS_FEATURE_SUGOV_TL */
+#endif
+
+#ifndef CONFIG_OPLUS_FEATURE_SUGOV_TL
 	trace_android_vh_map_util_freq(util, freq, max, &next_freq);
 	if (next_freq)
 		raw_freq = next_freq;
