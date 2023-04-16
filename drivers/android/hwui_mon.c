@@ -40,10 +40,10 @@ static struct {
 // Here, record info to support different versions of libhwui.so.
 #define INFO_COUNT 1
 	{
-		.checksum = "dea5f6def7787d5c89fe66e7f888455953fd8880",
-		.inject1_offset = 0x26868C,
+		.checksum = "cca357b8b0da12fd07d9ec0d603f80d28912d5c7",
+		.inject1_offset = 0x268480,
 		.reg = 4,
-		.inject2_offset = 0x2686A0
+		.inject2_offset = 0x268494
 	}
 };
 
