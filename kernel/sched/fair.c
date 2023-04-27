@@ -3892,6 +3892,11 @@ static inline bool task_fits_capacity(struct task_struct *p,
 	return capacity * 1024 > uclamp_task_util(p) * margin;
 }
 
+static inline int task_fits_cpu(struct task_struct *p, long capacity)
+{
+	return fits_capacity(uclamp_task_util(p), capacity);
+}
+
 static inline bool task_fits_max(struct task_struct *p, int cpu)
 {
 	unsigned long capacity = capacity_orig_of(cpu);

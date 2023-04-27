@@ -15,9 +15,6 @@ unsigned int sysctl_sched_min_task_util_for_boost = 51;
 /* 0.68ms default for 20ms window size scaled to 1024 */
 unsigned int sysctl_sched_min_task_util_for_colocation = 35;
 
-
-unsigned int map_scaling_freq(int cpu, unsigned int freq);
-
 static void create_util_to_cost_pd(struct em_perf_domain *pd)
 {
 	int util, cpu = cpumask_first(to_cpumask(pd->cpus));
@@ -34,7 +31,6 @@ static void create_util_to_cost_pd(struct em_perf_domain *pd)
 	        unsigned long fmax;
 
 	        fmax = map_util_freq_pixel_mod(util, ps->frequency, scale_cpu, cpu);
-                fmax = map_scaling_freq(cpu, fmax);
 
 		for (j = 0; j < pd->nr_cap_states; j++) {
 			ps = &pd->table[j];
