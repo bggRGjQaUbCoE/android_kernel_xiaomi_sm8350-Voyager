@@ -20,7 +20,6 @@ unsigned int pmu_poll_time_ms = 10;
 bool pmu_poll_enabled;
 extern void pmu_poll_enable(void);
 extern void pmu_poll_disable(void);
-extern int pmu_poll_init(void);
 
 #define MAX_PROC_SIZE 128
 
@@ -159,23 +158,3 @@ out:
 	return -ENOMEM;
 }
 
-static int vh_sched_init(void)
-{
-	int ret;
-
-	ret = pmu_poll_init();
-	if (ret) {
-		pr_err("pmu poll init failed\n");
-		return ret;
-	}
-
-	ret = create_procfs_node();
-	if (ret)
-		return ret;
-
-        pr_info("pmu init successfully!\n");
-
-	return 0;
-}
-
-module_init(vh_sched_init);

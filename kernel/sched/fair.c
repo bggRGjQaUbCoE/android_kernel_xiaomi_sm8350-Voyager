@@ -6970,6 +6970,10 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 }
 #endif
 
+extern unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
+				 unsigned long max, enum schedutil_type type,
+				 struct task_struct *p);
+
 /*
  * compute_energy(): Estimates the energy that @pd would consume if @p was
  * migrated to @dst_cpu. compute_energy() predicts what will be the utilization
@@ -7205,38 +7209,18 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		goto unlock;
 	}
 
-	if (cpumask_test_cpu(prev_cpu, p->cpus_ptr) && !__cpu_overutilized(prev_cpu, delta)) {
-		if (trace_sched_compute_energy_enabled()) {
-			memset(&output, 0, sizeof(output));
-			prev_delta = walt_compute_energy(p, prev_cpu, pd, candidates, fbt_env.prs,
-					&output);
-		} else {
-			prev_delta = walt_compute_energy(p, prev_cpu, pd, candidates, fbt_env.prs,
-					NULL);
-		}
-
-		best_delta = prev_delta;
-		trace_sched_compute_energy(p, prev_cpu, prev_delta, 0, 0, 0, &output);
-	} else {
+	if (cpumask_test_cpu(prev_cpu, &p->cpus_mask))
+		prev_delta = best_delta =
+				compute_energy(p, prev_cpu, pd);
+	else
 		prev_delta = best_delta = ULONG_MAX;
-	}
 
 	/* Select the best candidate energy-wise. */
 	for_each_cpu(cpu, candidates) {
 		if (cpu == prev_cpu)
 			continue;
 
-		if (trace_sched_compute_energy_enabled()) {
-			memset(&output, 0, sizeof(output));
-			cur_energy = walt_compute_energy(p, cpu, pd, candidates, fbt_env.prs,
-					&output);
-		} else {
-			cur_energy = walt_compute_energy(p, cpu, pd, candidates, fbt_env.prs,
-					NULL);
-		}
-
-		trace_sched_compute_energy(p, cpu, cur_energy,
-			prev_delta, best_delta, best_energy_cpu, &output);
+		cur_energy = compute_energy(p, cpu, pd);
 
 		if (cur_energy < best_delta) {
 			best_delta = cur_energy;

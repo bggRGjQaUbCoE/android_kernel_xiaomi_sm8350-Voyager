@@ -57,3 +57,5 @@ unsigned long map_util_freq_pixel_mod(unsigned long util, unsigned long freq,
 enum vendor_task_attribute {
 	VTA_GROUP,
 };
+
+int create_procfs_node(void);
